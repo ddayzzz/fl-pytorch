@@ -4,8 +4,7 @@ import torch
 import os
 import random
 from collections import namedtuple
-from dataset.read_leaf import read_leaf
-from dataset.read_pkl import read_pkl
+from dataset.read_data import read_leaf, read_from_file
 from utils.data_utils import MiniDataset
 from config import DATASETS, TRAINERS, MODEL_CONFIG, DATASET_WRAPPER
 from config import base_options, add_dynamic_options
@@ -81,7 +80,7 @@ def main():
     else:
         train_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'train')
         test_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'test')
-        df = read_pkl(train_path, test_path, sub_data=sub_data)
+        df = read_from_file(train_path, test_path, sub_data=sub_data)
     # df: train_clients, train_groups, train_data, test_data
     all_data_info = DatasetInfo(users=df[0], groups=df[1], train_data=df[2], test_data=df[3], validation_data=None, dataset_wrapper=dataset_wrapper)
     # 输出数据的信息

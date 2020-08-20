@@ -6,7 +6,7 @@ class Model(nn.Module):
 
     def __init__(self, seq_len, num_classes, num_hidden):
         super(Model, self).__init__()
-        self.input_shape = [80]
+        self.input_shape = [seq_len]
         self.input_type = 'index'  # 输入是 index
         self.num_hidden = num_hidden
         self.num_classes = num_classes

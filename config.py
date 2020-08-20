@@ -1,7 +1,8 @@
 # GLOBAL PARAMETERS
 import argparse
 from dataset.shakespeare.shakespeare import Shakespeare
-DATASETS = ['shakespeare', 'mnist']
+from dataset.sent140.sent140 import Sent140
+DATASETS = ['shakespeare', 'mnist', 'sent140']
 TRAINERS = {
     'fedavg': 'FedAvg',
     'fedprox': 'FedProx'
@@ -12,11 +13,13 @@ MODEL_CONFIG = {
     'mnist.logistic': {'out_dim': 10, 'in_dim': 784},
     'femnist.cnn': {'num_classes': 62, 'image_size': 28},
     'omniglot.cnn': {'num_classes': 5, 'image_size': 28},
-    'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, }
+    'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, },
+    'sent140.stacked_lstm': {'seq_len': 25, 'num_classes': 2, 'n_hidden': 100, 'embedding_dim': 300},
 }
 
 DATASET_WRAPPER = {
-    'shakespeare': Shakespeare
+    'shakespeare': Shakespeare,
+    'sent140': Sent140
 }
 
 

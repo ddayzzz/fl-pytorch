@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from torch import optim
 from torch import nn
 from utils.metrics import Meter
-from typing import OrderedDict, Dict, Union
+from typing import Dict, Union
 
 
 class BaseClient(object):
@@ -54,18 +54,18 @@ class BaseClient(object):
         opt = optim.SGD(self.model.parameters(), lr=self.options['lr'], momentum=0.5, weight_decay=self.options['wd'])
         return opt
 
-    def get_model_state_dict(self) -> OrderedDict[str, torch.Tensor]:
-        result = collections.OrderedDict()
-        for k, v in self.model.state_dict().items():
+    def get_model_parameters_dict(self) -> Dict[str, torch.Tensor]:
+        result = dict()
+        for k, v in self.model.named_parameters():
             result[k] = v.detach().clone()
         return result
 
-    def set_model_state_dict(self, state_dict):
+    def set_model_paramters_dict(self, parameters_dict : Dict[str, torch.Tensor]):
         # torch 自带 copy 的方法
-        copied = collections.OrderedDict()
-        for k, v in state_dict.items():
-            copied[k] = v.clone()
-        self.model.load_state_dict(copied)
+        for k, v in self.model.named_parameters():
+            # 见数据复制到 model 的位置, 二者是不共享位置的
+            v.data.copy_(parameters_dict[k])
+
 
     def count_correct(self, pred, targets):
         _, predicted = torch.max(pred, 1)
