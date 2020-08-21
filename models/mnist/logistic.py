@@ -4,7 +4,7 @@ import torch
 
 class Model(nn.Module):
 
-    def __init__(self, in_dim, out_dim, weight_init=torch.nn.init.xavier_uniform):
+    def __init__(self, options, in_dim, out_dim, weight_init=torch.nn.init.xavier_uniform):
         super(Model, self).__init__()
         self.layer = nn.Linear(in_dim, out_dim)
         # 初始化, 这个初始化和 tf.layers.dense 和 tf.get_variable(用于 weight)相同,

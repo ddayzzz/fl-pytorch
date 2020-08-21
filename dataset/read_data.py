@@ -2,7 +2,24 @@ import pickle
 from collections import defaultdict
 import os
 import json
+from collections import namedtuple
+from dataset.dataset_wrapper import MiniDataset
+from dataset.shakespeare.shakespeare import Shakespeare
+from dataset.sent140.sent140 import Sent140
 
+
+__all__ = ['read_leaf', 'read_from_file']
+DATASET_WRAPPER = {
+    'shakespeare': Shakespeare,
+    'sent140': Sent140
+}
+
+DatasetInfo = namedtuple('DatasetInfo', ['train_users', 'test_users', 'train_data', 'test_data', 'validation_data'])
+
+
+def wrap_dataset(dataset_name, data, options):
+    wrapper = DATASET_WRAPPER.get(dataset_name, MiniDataset)
+    return wrapper(data, options)
 
 def _read_dir_leaf(data_dir):
     print('>>> Read data from:', data_dir)
@@ -26,15 +43,24 @@ def _read_dir_leaf(data_dir):
     return clients, groups, data
 
 
-def read_leaf(train_data_dir, test_data_dir):
+def read_leaf(dataset_name, options, train_data_dir, test_data_dir) -> DatasetInfo:
     train_clients, train_groups, train_data = _read_dir_leaf(train_data_dir)
     test_clients, test_groups, test_data = _read_dir_leaf(test_data_dir)
 
     assert train_clients == test_clients
     assert train_groups == test_groups
-
-    return train_clients, train_groups, train_data, test_data
-
+    # name -> Dataset
+    user_train_data = dict(
+        [(k, wrap_dataset(dataset_name, data_dict, options)) for k, data_dict in train_data.items()])
+    user_test_data = dict(
+        [(k, wrap_dataset(dataset_name, data_dict, options)) for k, data_dict in test_data.items()])
+    return DatasetInfo(
+        train_users=train_clients,
+        test_users=test_clients,
+        train_data=user_train_data,
+        test_data=user_test_data,
+        validation_data=None
+    )
 
 def _load_data(fp, ext: str):
     if ext.lower() == '.pkl':
@@ -46,7 +72,7 @@ def _load_data(fp, ext: str):
     return cdata
 
 
-def read_from_file(train_data_dir, test_data_dir, sub_data=None):
+def read_from_file(dataset_name, options, train_data_dir, test_data_dir, sub_data=None) -> DatasetInfo:
     """
     解析数据
     :param train_data_dir: 训练数据目录, 自动读取 pkl
@@ -94,4 +120,17 @@ def read_from_file(train_data_dir, test_data_dir, sub_data=None):
         test_data_index.update(cdata['user_data'])
 
     clients = list(sorted(train_data_index.keys()))
-    return clients, groups, train_data_index, test_data_index
+    # name -> Dataset
+    user_train_data = dict([(k, wrap_dataset(dataset_name, data_dict, options)) for k, data_dict in train_data_index.items()])
+    user_test_data = dict([(k, wrap_dataset(dataset_name, data_dict, options)) for k, data_dict in test_data_index.items()])
+    return DatasetInfo(
+        train_users=clients,
+        test_users=clients,
+        train_data=user_train_data,
+        test_data=user_test_data,
+        validation_data=None
+    )
+
+
+def read_from_tff(dataset_name):
+    pass

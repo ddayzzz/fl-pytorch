@@ -13,7 +13,7 @@ class FedAvg(FedBase):
         for round_i in range(self.num_rounds):
             print(f'>>> Global Training Round : {round_i}')
 
-            selected_clients = self.select_clients(round_i=round_i, num_clients=self.clients_per_round)
+            selected_clients = self.select_clients(round_i=round_i, clients_per_rounds=self.clients_per_round)
 
             solns, num_samples = self.solve_epochs(round_i, clients=selected_clients)
 
@@ -21,10 +21,10 @@ class FedAvg(FedBase):
             self.latest_model = self.aggregate(solns, num_samples)
             # eval on test
             if round_i % self.eval_on_test_every_round == 0:
-                self.eval_on(use_test_data=True, round_i=round_i, clients=self.clients)
+                self.eval_on(round_i=round_i, clients=self.test_clients, client_type='test')
 
             if round_i % self.eval_on_train_every_round == 0:
-                self.eval_on(use_train_data=True, round_i=round_i, clients=self.clients)
+                self.eval_on(round_i=round_i, clients=self.train_clients, client_type='train')
 
             if round_i % self.save_every_round == 0:
                 # self.save_model(round_i)

@@ -1,4 +1,4 @@
-import numpy as np
+from torch.utils.data import Dataset
 import pandas as pd
 
 
@@ -14,10 +14,10 @@ def print_stats(data, users, title):
     y_size = []
     all_classes = set()
     for i, user in enumerate(users):
-        x, y = data[user]['x'], data[user]['y']
-        num_data = len(y)
-        # assert num_data == len(y)
-        y_unique = set(y)
+        ds = data[user]
+        assert isinstance(ds, Dataset)
+        num_data = len(ds)
+        y_unique = set([y for _, y in ds])
         y_size.append(num_data)
         # y 个类别的数量
         # y_size.append(len(y_unique))

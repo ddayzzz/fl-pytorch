@@ -14,13 +14,13 @@ def mkdir(path):
 
 class Metrics(object):
 
-    def __init__(self, clients, options, name='', append2suffix=None, result_prefix='./result'):
+    def __init__(self, options, name='', append2suffix=None, result_prefix='./result'):
         self.options = options
         num_rounds = options['num_rounds'] + 1
 
-        self.bytes_written = {c.id: [0] * num_rounds for c in clients}
-        self.client_computations = {c.id: [0] * num_rounds for c in clients}
-        self.bytes_read = {c.id: [0] * num_rounds for c in clients}
+        # self.bytes_written = {c.id: [0] * num_rounds for c in clients}
+        # self.client_computations = {c.id: [0] * num_rounds for c in clients}
+        # self.bytes_read = {c.id: [0] * num_rounds for c in clients}
 
         # 记录训练的信息
         # customs
@@ -80,9 +80,9 @@ class Metrics(object):
         metrics = dict()
 
         # Dict(key=cid, value=list(stats for each round))
-        metrics['client_computations'] = self.client_computations
-        metrics['bytes_written'] = self.bytes_written
-        metrics['bytes_read'] = self.bytes_read
+        # metrics['client_computations'] = self.client_computations
+        # metrics['bytes_written'] = self.bytes_written
+        # metrics['bytes_read'] = self.bytes_read
         for key, data in self.customs_data.items():
             metrics[key] = data
         metrics_dir = os.path.join(self.result_path, self.exp_name, 'metrics.json')

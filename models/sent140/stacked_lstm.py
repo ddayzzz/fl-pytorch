@@ -6,7 +6,7 @@ from dataset.sent140.sent140 import Sent140
 
 class Model(nn.Module):
 
-    def __init__(self, seq_len, num_classes, n_hidden, embedding_dim):
+    def __init__(self, options, seq_len, num_classes, n_hidden, embedding_dim):
         super(Model, self).__init__()
         # 提前初始化
         if Sent140.WORD_EMBEDDING is None:

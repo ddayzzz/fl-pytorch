@@ -2,14 +2,17 @@ import numpy as np
 import os
 import time
 import collections
-from typing import OrderedDict, Dict, List
+from typing import OrderedDict, Dict, List, Any, Union, Iterable, Tuple
 import abc
 import torch
+from torch.utils.data import Dataset
 from torch import nn, optim
 import pandas as pd
-from clients.base_client import BaseClient
+from clients.base_client import BaseClient, get_model_parameters_dict, set_model_parameters_dict
 from utils.metrics import Metrics
 from utils.flops_counter import get_model_complexity_info
+from dataset.read_data import DatasetInfo
+
 
 
 class FedBase(abc.ABC):
@@ -29,7 +32,13 @@ class FedBase(abc.ABC):
         self.model, self.flops, self.params_num, self.model_bytes = self.setup_model(model=model)
         self.device = options['device']
         # 记录总共的训练数据
-        self.clients = self.setup_clients(dataset_info=dataset_info)
+        client_info = self.setup_clients(dataset_info=dataset_info)
+        # TODO orderdict 可以这么写
+        self.train_client_ids, self.train_clients = (client_info['train_clients'][0], list(client_info['train_clients'][1].values()))
+        self.test_client_ids, self.test_clients = (client_info['test_clients'][0], list(client_info['test_clients'][1].values()))
+        self.num_train_clients = len(self.train_client_ids)
+        self.num_test_clients = len(self.test_client_ids)
+
         self.num_epochs = options['num_epochs']
         self.num_rounds = options['num_rounds']
         self.clients_per_round = options['clients_per_round']
@@ -37,47 +46,58 @@ class FedBase(abc.ABC):
         self.eval_on_train_every_round = options['eval_on_train_every']
         self.eval_on_test_every_round = options['eval_on_test_every']
         self.eval_on_validation_every_round = options['eval_on_validation_every']
-        self.num_clients = len(self.clients)
         # 使用 client 的API
         self.latest_model = self.get_latest_model()
-        self.name = '_'.join(['', f'wn{options["clients_per_round"]}', f'tn{self.num_clients}'])
-        self.metrics = Metrics(clients=self.clients, options=options, name=self.name, append2suffix=append2metric, result_prefix=options['result_prefix'])
+        self.name = '_'.join(['', f'wn[{options["clients_per_round"]}]', f'num_train[{self.num_train_clients}]', f'num_test[{self.num_test_clients}]'])
+        self.metrics = Metrics(options=options, name=self.name, append2suffix=append2metric, result_prefix=options['result_prefix'])
         self.quiet = options['quiet']
+
 
     def setup_model(self, model):
         dev = self.options['device']
         model = model.to(dev)
-        input_shape = model.input_shape
-        input_type = model.input_type if hasattr(model, 'input_type') else None
-        flops, params_num, model_bytes = \
-            get_model_complexity_info(model, input_shape, input_type=input_type, device=dev)
-        return model, flops, params_num, model_bytes
+        # input_shape = model.input_shape
+        # input_type = model.input_type if hasattr(model, 'input_type') else None
+        # flops, params_num, model_bytes = \
+        #     get_model_complexity_info(model, input_shape, input_type=input_type, device=dev)
+        # return model, flops, params_num, model_bytes
+        return model, None, None, None
 
-    def get_latest_model(self):
-        return self.clients[0].get_model_state_dict()
+    def get_latest_model(self) -> Dict[str, torch.Tensor]:
+        # 默认使用第一个训练的客户端的
+        return get_model_parameters_dict(self.model)
 
-    def setup_clients(self, dataset_info):
-        if len(dataset_info.groups) == 0:
-            groups = [None for _ in dataset_info.users]
-        else:
-            groups = dataset_info.groups
+    def create_clients_group(self, users: Iterable[Any], train_or_test_dataset_obj: Dict[Any, Dataset], dataset_type) -> OrderedDict[Any, BaseClient]:
+        """
 
-        all_clients = []
-        for user, group in zip(dataset_info.users, groups):
-
-            tr = dataset_info.dataset_wrapper(dataset_info.train_data[user], options=self.options)
-            te = dataset_info.dataset_wrapper(dataset_info.test_data[user], options=self.options)
-            if dataset_info.validation_data is not None:
-                va = dataset_info.dataset_wrapper(dataset_info.validation_data[user], options=self.options)
-            else:
-                va = None
-
-            c = BaseClient(id=user, options=self.options, train_dataset=tr, test_dataset=te, model=self.model, validation_dataset=va)
-            all_clients.append(c)
+        :param dataset_info: {client_id: xxx}
+        :return:
+        """
+        all_clients = collections.OrderedDict()
+        for user in users:
+            c = BaseClient(id=user, model=self.model, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
+            all_clients[user] = c
         return all_clients
 
-    def set_latest_model(self, client: BaseClient):
-        client.set_model_state_dict(self.latest_model)
+    def setup_clients(self, dataset_info: Union[DatasetInfo]) -> Dict[Any, Tuple[List[Any], OrderedDict[Any, BaseClient]]]:
+        """
+        :param dataset_info:
+        :return: 分为 train, test 或者其他的客户端. 第一个元素为客户端的 id,
+        """
+        result = dict()
+        if isinstance(dataset_info, DatasetInfo):
+            if dataset_info.train_data is not None:
+                result['train_clients'] = (dataset_info.train_users, self.create_clients_group(users=dataset_info.train_users, train_or_test_dataset_obj=dataset_info.train_data, dataset_type='train'))
+            if dataset_info.test_data is not None:
+                result['test_clients'] = (dataset_info.test_users, self.create_clients_group(users=dataset_info.test_users, train_or_test_dataset_obj=dataset_info.test_data, dataset_type='test'))
+            if dataset_info.validation_data is not None:
+                raise NotImplementedError
+            return result
+        else:
+            raise NotImplementedError
+
+    def set_latest_model(self):
+        set_model_parameters_dict(self.model, self.latest_model)
 
     @abc.abstractmethod
     def aggregate(self, *args, **kwargs):
@@ -87,25 +107,24 @@ class FedBase(abc.ABC):
     def train(self, *args, **kwargs):
         pass
 
-    def select_clients(self, round_i, num_clients):
+    def select_clients(self, round_i, clients_per_rounds) -> List[BaseClient]:
         """
         选择客户端, 采用的均匀的无放回采样
         :param round:
         :param num_clients:
         :return:
         """
-        num_clients = min(num_clients, self.num_clients)
         np.random.seed(round_i)  # 确定每一轮次选择相同的客户端(用于比较不同算法在同一数据集下的每一轮的客户端不变)
-        return np.random.choice(self.clients, num_clients, replace=False).tolist()
+        return np.random.choice(self.train_clients, clients_per_rounds, replace=False).tolist()
 
-    def aggregate_parameters_weighted(self, solns: List[OrderedDict[str, torch.Tensor]], num_samples: List[int]) -> OrderedDict[str, torch.Tensor]:
+    def aggregate_parameters_weighted(self, solns: List[Dict[str, torch.Tensor]], num_samples: List[int]) -> Dict[str, torch.Tensor]:
         """
         聚合模型
         :param solns: 列表.
         :param kwargs:
         :return: 聚合后的参数
         """
-        lastes = collections.OrderedDict()
+        lastes = dict()
         for p_name in solns[0].keys():
             new = torch.zeros_like(solns[0][p_name])
             sz = 0
@@ -116,9 +135,7 @@ class FedBase(abc.ABC):
             lastes[p_name] = new
         return lastes
 
-
-    def eval_on(self, round_i, clients, use_test_data=False, use_train_data=False, use_val_data=False):
-        assert use_test_data + use_train_data + use_val_data == 1, "不能同时设置"
+    def eval_on(self, round_i, clients: Iterable[BaseClient], client_type):
         df = pd.DataFrame(columns=['client_id', 'mean_acc', 'mean_loss', 'num_samples'])
 
         num_samples = []
@@ -126,13 +143,8 @@ class FedBase(abc.ABC):
         correct_num = []
         for c in clients:
             # 设置网络
-            self.set_latest_model(client=c)
-            if use_test_data:
-                stats =c.test(c.test_dataset_loader)
-            elif use_train_data:
-                stats = c.test(c.train_dataset_loader)
-            elif use_val_data:
-                stats = c.test(c.validation_dataset_loader)
+            self.set_latest_model()
+            stats = c.test()
 
             num_samples.append(stats['num_samples'])
             losses.append(stats['loss_meter'].sum)
@@ -146,19 +158,12 @@ class FedBase(abc.ABC):
         mean_loss = sum(losses) / all_sz
         mean_acc = sum(correct_num) / all_sz
         #
-        if use_test_data:
-            fn, on = 'test_at_round_{}.csv'.format(round_i), 'test'
-        elif use_train_data:
-            fn, on = 'train_at_round_{}.csv'.format(round_i), 'train'
-        elif use_val_data:
-            fn, on = 'validation_at_round_{}.csv'.format(round_i), 'validation'
-        #
         if not self.quiet:
-            print(f'Round {round_i}, eval on "{on}" dataset mean loss: {mean_loss:.5f}, mean acc: {mean_acc:.3%}')
+            print(f'Round {round_i}, eval on "{client_type}" client mean loss: {mean_loss:.5f}, mean acc: {mean_acc:.3%}')
         # round_i, on_which, filename, other_to_logger
-        self.metrics.update_eval_stats(round_i=round_i, on_which=on, other_to_logger={'acc': mean_acc, 'loss': mean_loss}, df=df)
+        self.metrics.update_eval_stats(round_i=round_i, on_which=client_type, other_to_logger={'acc': mean_acc, 'loss': mean_loss}, df=df)
 
-    def solve_epochs(self, round_i, clients, num_epochs=None):
+    def solve_epochs(self, round_i, clients: Iterable[BaseClient], num_epochs=None):
         if num_epochs is None:
             num_epochs = self.num_epochs
 
@@ -168,15 +173,15 @@ class FedBase(abc.ABC):
 
         solns = []
         for c in clients:
-            self.set_latest_model(client=c)
+            self.set_latest_model()
             # 保存信息
-            stat = c.solve_epochs(round_i, c.train_dataset_loader, num_epochs, hide_output=self.quiet)
+            stat = c.solve_epochs(round_i, num_epochs, hide_output=self.quiet)
 
             num_samples.append(stat['num_samples'])
             losses.append(stat['loss_meter'].sum)
             correct_num.append(stat['acc_meter'].sum)
             #
-            soln = c.get_model_state_dict()
+            soln = c.get_model_parameters_dict()
             solns.append(soln)
             # 写入测试的相关信息
             # self.metrics.update_commu_stats(round_i, flop_stat)

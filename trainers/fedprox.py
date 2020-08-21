@@ -1,30 +1,45 @@
 import torch
 import time
 import numpy as np
-from typing import List
+from typing import OrderedDict, Dict, List, Any, Union, Iterable, Tuple
+import collections
+import abc
 from optimizers.pgd import PerturbedGradientDescent
 from clients.base_client import BaseClient
 from trainers.fedbase import FedBase
+from torch.nn import Module
+from torch.utils.data import Dataset
+
+
+def get_model_parameters_list(model: Module) -> List[torch.Tensor]:
+    p = [p.detach().clone() for p in model.parameters()]
+    return p
+
+
+def set_model_parameters_list(model: Module, params: List[torch.Tensor]):
+    for p, src in zip(model.parameters(), params):
+        p.data.copy_(src.data)
 
 
 class FedProxClient(BaseClient):
 
-    def __init__(self, id, model, train_dataset, test_dataset, options):
-        super(FedProxClient, self).__init__(id, model, train_dataset, test_dataset, options, validation_dataset=None)
+    def __init__(self, id, model: Module, dataset, dataset_type, options):
+        super(FedProxClient, self).__init__(id, model, dataset, dataset_type, options)
 
     def create_optimizer(self):
-        return PerturbedGradientDescent(params=self.model.parameters(),
-                                        weight_decay=self.options['wd'],
-                                        mu=self.options['mu'],
-                                        lr=self.options['lr'])
+        if self.dataset_type == 'train':
+            return PerturbedGradientDescent(params=self.model.parameters(),
+                                            weight_decay=self.options['wd'],
+                                            mu=self.options['mu'],
+                                            lr=self.options['lr'])
+        else:
+            return None
 
     def get_model_parameters_list(self) -> List[torch.Tensor]:
-        p = [p.detach().clone() for p in self.model.parameters()]
-        return p
+        return get_model_parameters_list(self.model)
 
     def set_model_parameters_list(self, params: List[torch.Tensor]):
-        for p, src in zip(self.model.parameters(), params):
-            p.data.copy_(src.data)
+        set_model_parameters_list(self.model, params)
 
 
 class FedProx(FedBase):
@@ -37,34 +52,28 @@ class FedProx(FedBase):
         super(FedProx, self).__init__(options=options, model=model, dataset_info=dataset_info, append2metric=a)
 
     def get_latest_model(self):
-        return self.clients[0].get_model_parameters_list()
+        return get_model_parameters_list(self.model)
 
-    def set_latest_model(self, client: FedProxClient):
-        client.set_model_parameters_list(self.latest_model)
+    def set_latest_model(self):
+        # client和 fedbase 都共用了模型
+        set_model_parameters_list(self.model, self.latest_model)
 
-    def setup_clients(self, dataset_info):
-        if len(dataset_info.groups) == 0:
-            groups = [None for _ in dataset_info.users]
-        else:
-            groups = dataset_info.groups
-        all_clients = []
-        for user, group in zip(dataset_info.users, groups):
-            tr = dataset_info.dataset_wrapper(dataset_info.train_data[user], options=self.options)
-            te = dataset_info.dataset_wrapper(dataset_info.test_data[user], options=self.options)
-            c = FedProxClient(id=user, options=self.options, train_dataset=tr, test_dataset=te, model=self.model)
-            all_clients.append(c)
+    def create_clients_group(self, users: Iterable[Any], train_or_test_dataset_obj: Dict[Any, Dataset], dataset_type) -> OrderedDict[Any, FedProxClient]:
+        all_clients = collections.OrderedDict()
+        for user in users:
+            c = FedProxClient(id=user, model=self.model, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
+            all_clients[user] = c
         return all_clients
 
-    def select_clients(self, round_i, num_clients):
+    def select_clients(self, round_i, clients_per_rounds) -> List[int]:
         """
         这个返回client的索引而非对象
         :param round_i:
         :param num_clients: 选择的客户端的数量
         :return:
         """
-        num_clients = min(num_clients, self.num_clients)
         np.random.seed(round_i)  # 确定每一轮次选择相同的客户端(用于比较不同算法在同一数据集下的每一轮的客户端不变)
-        return np.random.choice(self.num_clients, num_clients, replace=False).tolist()
+        return np.random.choice(self.num_train_clients, clients_per_rounds, replace=False).tolist()
 
     def aggregate_parameters_weighted(self, solns: List[List[torch.Tensor]], num_samples: List[int]) -> List[torch.Tensor]:
         """
@@ -88,7 +97,7 @@ class FedProx(FedBase):
     def aggregate(self, solns, num_samples):
         return self.aggregate_parameters_weighted(solns, num_samples)
 
-    def solve_epochs(self,round_i, clients, num_epochs=None):
+    def solve_epochs(self,round_i, clients: List[int], num_epochs=None):
         if num_epochs is None:
             num_epochs = self.num_epochs
 
@@ -108,10 +117,11 @@ class FedProx(FedBase):
             else:
                 # 需要变化 epoch 的客户端
                 epoch = np.random.randint(low=1, high=num_epochs)
-            c = self.clients[c_index]
+            c = self.train_clients[c_index]
             # 设置优化器的参数
             c.optimizer.set_old_weights(old_weights=self.latest_model)
-            c.set_model_parameters_list(self.latest_model)
+            # 同步为最新的模型
+            self.set_latest_model()
             # 保存信息
             stat = c.solve_epochs(round_i, c.train_dataset_loader, epoch, hide_output=self.quiet)
             tot_corrects.append(stat['acc_meter'].sum)
@@ -136,14 +146,15 @@ class FedProx(FedBase):
     def train(self):
         for round_i in range(self.num_rounds):
             print(f'>>> Global Training Round : {round_i}')
-            selected_client_indices = self.select_clients(round_i=round_i, num_clients=self.clients_per_round)
+            selected_client_indices = self.select_clients(round_i=round_i, clients_per_rounds=self.clients_per_round)
             solns, num_samples = self.solve_epochs(round_i=round_i, clients=selected_client_indices)
             self.latest_model = self.aggregate(solns, num_samples)
             # eval on test
             if round_i % self.eval_on_test_every_round == 0:
-                self.eval_on(use_test_data=True, round_i=round_i, clients=self.clients)
+                self.eval_on(round_i=round_i, clients=self.test_clients, client_type='test')
+
             if round_i % self.eval_on_train_every_round == 0:
-                self.eval_on(use_train_data=True, round_i=round_i, clients=self.clients)
+                self.eval_on(round_i=round_i, clients=self.train_clients, client_type='train')
 
             if round_i % self.save_every_round == 0:
                 # self.save_model(round_i)

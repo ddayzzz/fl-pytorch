@@ -1,26 +1,25 @@
 # GLOBAL PARAMETERS
 import argparse
-from dataset.shakespeare.shakespeare import Shakespeare
-from dataset.sent140.sent140 import Sent140
+
 DATASETS = ['shakespeare', 'mnist', 'sent140']
 TRAINERS = {
     'fedavg': 'FedAvg',
-    'fedprox': 'FedProx'
+    'fedprox': 'FedProx',
+    'fedfuse': 'FedFuse'
 }
 
 TRAINER_NAMES = TRAINERS.keys()
 MODEL_CONFIG = {
     'mnist.logistic': {'out_dim': 10, 'in_dim': 784},
+    'mnist.cnn_att':  {'image_size': 28},
+    'mnist.cnn': {'image_size': 28},
     'femnist.cnn': {'num_classes': 62, 'image_size': 28},
     'omniglot.cnn': {'num_classes': 5, 'image_size': 28},
     'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, },
     'sent140.stacked_lstm': {'seq_len': 25, 'num_classes': 2, 'n_hidden': 100, 'embedding_dim': 300},
 }
 
-DATASET_WRAPPER = {
-    'shakespeare': Shakespeare,
-    'sent140': Sent140
-}
+
 
 
 def base_options():
@@ -43,6 +42,7 @@ def base_options():
                         help='weight decay parameter;',
                         type=float,
                         default=0.001)
+    parser.add_argument('--momentum', type=float, default=0.5)
     parser.add_argument('--device',
                         help='device',
                         default='cpu:0',
@@ -110,4 +110,6 @@ def add_dynamic_options(parser):
     if algo in ['fedprox']:
         parser.add_argument('--mu', help='mu', type=float, default=0.1)
         parser.add_argument('--drop_rate', help='drop rate', default=0.0, type=float)
+    elif algo == 'fedfuse':
+        parser.add_argument('--operator', help='fuse operator', type=str, required=True, choices=['multi', 'conv', 'single'])
     return parser

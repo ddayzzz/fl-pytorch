@@ -6,12 +6,9 @@ import random
 from collections import namedtuple
 from dataset.read_data import read_leaf, read_from_file
 from utils.data_utils import MiniDataset
-from config import DATASETS, TRAINERS, MODEL_CONFIG, DATASET_WRAPPER
+from config import DATASETS, TRAINERS, MODEL_CONFIG
 from config import base_options, add_dynamic_options
 from dataset.statistical_info import print_stats
-
-
-DatasetInfo = namedtuple('DatasetInfo', ['users', 'groups', 'train_data', 'test_data', 'validation_data', 'dataset_wrapper'])
 
 
 def read_options():
@@ -36,8 +33,6 @@ def read_options():
     else:
         dataset_name, sub_data = options['dataset'], None
     assert dataset_name in DATASETS, "{} not in dataset {}!".format(dataset_name, DATASETS)
-    # 数据集的包装器
-    dataset_wrapper = DATASET_WRAPPER.get(dataset_name, MiniDataset)
 
     # 将配置的参数添加到测试文件中
     model_cfg_key ='.'.join((dataset_name, options['model']))
@@ -51,7 +46,7 @@ def read_options():
     # 加载模型类
     model_path = 'models.{0}.{1}'.format(dataset_name, options['model'])
     mod = importlib.import_module(model_path)
-    model_obj = getattr(mod, 'Model')(**model_cfg)
+    model_obj = getattr(mod, 'Model')(options=options, **model_cfg)
 
     # 打印参数
     max_length = max([len(key) for key in options.keys()])
@@ -60,14 +55,14 @@ def read_options():
     for keyPair in sorted(options.items()):
         print(fmt_string % keyPair)
 
-    return options, model_obj, trainer_class, dataset_wrapper, dataset_name, sub_data
+    return options, model_obj, trainer_class, dataset_name, sub_data
 
 
 def main():
 
 
     # 解析参数
-    options, model_obj, trainer_class, dataset_wrapper, dataset_name, sub_data = read_options()
+    options, model_obj, trainer_class, dataset_name, sub_data = read_options()
 
     # 数据的文件始终在其父目录
     dataset_prefix = os.path.realpath(options['data_prefix'])
@@ -76,18 +71,18 @@ def main():
     if is_leaf:
         train_path = os.path.join(dataset_prefix, 'data', dataset_name, 'data', 'train')
         test_path = os.path.join(dataset_prefix, 'data', dataset_name, 'data', 'test')
-        df = read_leaf(train_path, test_path)
+        df = read_leaf(dataset_name=dataset_name, options=options, train_data_dir=train_path, test_data_dir=test_path)
     else:
         train_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'train')
         test_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'test')
-        df = read_from_file(train_path, test_path, sub_data=sub_data)
+        df = read_from_file(train_data_dir=train_path, test_data_dir=test_path, sub_data=sub_data, dataset_name=dataset_name, options=options)
     # df: train_clients, train_groups, train_data, test_data
-    all_data_info = DatasetInfo(users=df[0], groups=df[1], train_data=df[2], test_data=df[3], validation_data=None, dataset_wrapper=dataset_wrapper)
+
     # 输出数据的信息
-    print_stats(all_data_info.train_data, all_data_info.users, title='>>> 训练数据信息')
-    print_stats(all_data_info.test_data, all_data_info.users, title='>>> 测试数据信息')
+    print_stats(df.train_data, df.train_users, title='>>> 训练数据信息')
+    print_stats(df.test_data, df.test_users, title='>>> 测试数据信息')
     # 调用solver
-    trainer = trainer_class(options, all_data_info, model_obj)
+    trainer = trainer_class(options, df, model_obj)
     trainer.train()
 
 

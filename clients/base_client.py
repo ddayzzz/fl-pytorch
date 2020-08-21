@@ -1,16 +1,29 @@
 import tqdm
 import torch
-import collections
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torch import optim
 from torch import nn
 from utils.metrics import Meter
 from typing import Dict, Union
 
 
+def get_model_parameters_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
+    result = dict()
+    for k, v in model.named_parameters():
+        result[k] = v.detach().clone()
+    return result
+
+
+def set_model_parameters_dict(model: nn.Module, parameters_dict: Dict[str, torch.Tensor]):
+    # torch 自带 copy 的方法
+    for k, v in model.named_parameters():
+        # 见数据复制到 model 的位置, 二者是不共享位置的
+        v.data.copy_(parameters_dict[k])
+
+
 class BaseClient(object):
 
-    def __init__(self, id, model: nn.Module, train_dataset, test_dataset, options: dict, validation_dataset=None):
+    def __init__(self, id, model: nn.Module, dataset: Dataset, dataset_type: str, options: dict):
         """
 
         :param id:
@@ -23,56 +36,48 @@ class BaseClient(object):
         self.id = id
         self.options = options
         # 这个必须是客户端相关的
-        self.num_train_dataset = len(train_dataset)
-        self.num_test_dataset = len(test_dataset)
-        if validation_dataset is not None:
-            self.num_validation_dataset = len(validation_dataset)
+        self.num_dataset = len(dataset)
         self.num_workers = options['num_workers']
         self.batch_size = options['batch_size']
         self.device = options['device']
         self.model = model
+        self.dataset_type = dataset_type
         #
         self.criterion = self.create_criterion()
         self.optimizer = self.create_optimizer()
         #
-        self.train_dataset_loader = self.create_data_loader(train_dataset, dataset_type='train')
-        self.test_dataset_loader = self.create_data_loader(test_dataset, dataset_type='test')
-        if validation_dataset is not None:
-            self.validation_dataset_loader = self.create_data_loader(validation_dataset, dataset_type='valid')
+        self.dataset_loader = self.create_data_loader(dataset)
 
     def __repr__(self):
-        return 'BaseClient <id={}>'.format(self.id)
+        return 'BaseClient <id={} dataset_type={}>'.format(self.id, self.dataset_type)
 
-    def create_data_loader(self, dataset, dataset_type):
-        shuffle = dataset_type == 'train'
+    def create_data_loader(self, dataset) -> DataLoader:
+        shuffle = self.dataset_type == 'train'
         return DataLoader(dataset, batch_size=self.batch_size, shuffle=shuffle, num_workers=self.num_workers, pin_memory=True)
 
     def create_criterion(self):
         return nn.CrossEntropyLoss(reduction='mean').to(self.device)
 
     def create_optimizer(self):
-        opt = optim.SGD(self.model.parameters(), lr=self.options['lr'], momentum=0.5, weight_decay=self.options['wd'])
-        return opt
+        if self.dataset_type == 'train':
+            opt = optim.SGD(self.model.parameters(), lr=self.options['lr'], momentum=self.options['momentum'],
+                            weight_decay=self.options['wd'])
+            return opt
+        else:
+            return None
 
     def get_model_parameters_dict(self) -> Dict[str, torch.Tensor]:
-        result = dict()
-        for k, v in self.model.named_parameters():
-            result[k] = v.detach().clone()
-        return result
+        return get_model_parameters_dict(self.model)
 
-    def set_model_paramters_dict(self, parameters_dict : Dict[str, torch.Tensor]):
-        # torch 自带 copy 的方法
-        for k, v in self.model.named_parameters():
-            # 见数据复制到 model 的位置, 二者是不共享位置的
-            v.data.copy_(parameters_dict[k])
-
+    def set_model_parameters_dict(self, parameters_dict: Dict[str, torch.Tensor]):
+        set_model_parameters_dict(self.model, parameters_dict)
 
     def count_correct(self, pred, targets):
         _, predicted = torch.max(pred, 1)
         correct = predicted.eq(targets).sum()
         return correct
 
-    def test(self, dataset_loader) -> Dict[str, Union[int, Meter]]:
+    def test(self) -> Dict[str, Union[int, Meter]]:
         self.model.eval()
 
         loss_meter = Meter()
@@ -81,7 +86,7 @@ class BaseClient(object):
 
         with torch.no_grad():
 
-            for batch_idx, (X, y) in enumerate(dataset_loader):
+            for batch_idx, (X, y) in enumerate(self.dataset_loader):
                 X, y = X.to(self.device), y.to(self.device)
                 pred = self.model(X)
                 loss = self.criterion(pred, y)
@@ -98,7 +103,7 @@ class BaseClient(object):
             'num_samples': num_all_samples
         }
 
-    def solve_epochs(self, round_i, data_loader, num_epochs, hide_output: bool = False) -> Dict[str, Union[int, Meter]]:
+    def solve_epochs(self, round_i, num_epochs, hide_output: bool = False) -> Dict[str, Union[int, Meter]]:
         loss_meter = Meter()
         acc_meter = Meter()
         num_all_samples = 0
@@ -108,7 +113,7 @@ class BaseClient(object):
 
             for epoch in t:
                 t.set_description(f'Client: {self.id}, Round: {round_i}, Epoch :{epoch}')
-                for batch_idx, (X, y) in enumerate(data_loader):
+                for batch_idx, (X, y) in enumerate(self.dataset_loader):
                     # from IPython import embed
                     X, y = X.to(self.device), y.to(self.device)
 
@@ -135,8 +140,3 @@ class BaseClient(object):
             'acc_meter': acc_meter,
             'num_samples': num_all_samples
         }
-
-
-
-
-
