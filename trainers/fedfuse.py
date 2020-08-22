@@ -13,56 +13,35 @@ from utils.metrics import Meter
 import pandas as pd
 
 
-# def get_model_parameters_dict(model: Module) -> Dict[str, torch.Tensor]:
-#     # 不需要额外复制 attn 和 global 模型
-#     result = dict()
-#     for k, v in model.features.named_parameters():
-#         result['features.' + k] = v.detach().clone()
-#     for k, v in model.classifier.named_parameters():
-#         result['classifier.' + k] = v.detach().clone()
-#     return result
-#
-#
-# def set_model_parameters_dict(model: Module, parameters_dict: Dict[str, torch.Tensor]):
-#     for k, v in model.features.named_parameters():
-#         # 见数据复制到 model 的位置, 二者是不共享位置的
-#         v.data.copy_(parameters_dict['features.' + k])
-#     for k, v in model.classifier.named_parameters():
-#         v.data.copy_(parameters_dict['classifier.' + k])
-
-
 class FedFuseClient(BaseClient):
 
     def __init__(self, id, model: Module, dataset, dataset_type, options):
         super(FedFuseClient, self).__init__(id, model, dataset, dataset_type, options)
         self.fuse_operator = options['operator']
         # attention 层的参数
-        # self.client_fuse_operator = [p.data.clone() for k, p in self.model.attn.named_parameters()]
+        self.client_fuse_operator = [p.data.clone() for k, p in self.model.attn.named_parameters()]
 
-    def backup_client_data(self, mu=0.9):
+    def create_optimizer(self):
+        from torch import optim
+        if self.dataset_type == 'train':
+            opt = optim.SGD(filter(lambda x: x.requires_grad, self.model.parameters()), lr=self.options['lr'],
+                            momentum=self.options['momentum'],
+                            weight_decay=self.options['wd'])
+            return opt
+        else:
+            return None
+
+    def backup_attention(self, mu=0.9):
+        copied = [p.data.clone() for p in self.model.attn.parameters()]
         if self.fuse_operator in ['multi', 'single']:
             # 需要手动 weight_decay
             # TODO 这两个 operator 都是一个参数, λ
-            # copied = [(1 - mu) * copied[0] + mu * self.client_fuse_operator[0]]
-            for tar, src in zip(self.client_fuse_operator, self.model.attn.parameters()):
-                # 做了 (1 - mu) * src + mu * tar, 由于这个 shadow 变量是复制的, 因此可以直接做 inplace 操作
-                tar.mul_(mu).add_(src.data, alpha=1 - mu)
-        else:
-            # conv
-            for tar, src in zip(self.client_fuse_operator, self.model.attn.parameters()):
-                # 这个没办法, 直接赋值吧.
-                tar.copy_(src.data)
+            copied = [(1 - mu) * copied[0] + mu * self.client_fuse_operator[0]]
+        self.client_fuse_operator = copied
 
     def recover_client_data(self):
         for p, src in zip(self.model.attn.parameters(), self.client_fuse_operator):
             p.data.copy_(src.data)
-
-    def get_model_parameters_dict(self) -> Dict[str, torch.Tensor]:
-        return get_model_parameters_dict(self.model)
-
-    def set_model_parameters_dict(self, parameters_dict : Dict[str, torch.Tensor]):
-        set_model_parameters_dict(self.model, parameters_dict)
-
 
 
 class FedFuse(FedBase):
@@ -79,17 +58,17 @@ class FedFuse(FedBase):
     def get_latest_model(self) -> Dict[str, torch.Tensor]:
         return get_model_parameters_dict(self.model)
 
-    def create_clients_group(self, users: Iterable[Any], train_or_test_dataset_obj: Dict[Any, Dataset], dataset_type) -> OrderedDict[Any, BaseClient]:
+    def create_clients_group(self, users: Iterable[Any], train_or_test_dataset_obj: Dict[Any, Dataset], dataset_type) -> OrderedDict[Any, FedFuseClient]:
         all_clients = collections.OrderedDict()
         for user in users:
-            c = BaseClient(id=user, model=self.model, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
+            c = FedFuseClient(id=user, model=self.model, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
             all_clients[user] = c
         return all_clients
 
     def aggregate(self, solns, num_samples):
         return self.aggregate_parameters_weighted(solns, num_samples)
 
-    def solve_epochs(self,round_i, clients: Iterable[BaseClient], num_epochs=None):
+    def solve_epochs(self,round_i, clients: Iterable[FedFuseClient], num_epochs=None):
         if num_epochs is None:
             num_epochs = self.num_epochs
 
@@ -101,12 +80,13 @@ class FedFuse(FedBase):
         for i, c in enumerate(clients):
             # 设置全局的参数
             self.set_latest_model()
-            # c.recover_client_data()
 
             if i == 0:
                 # TODO 第一次设置就行, 模型中都是 deepcopy
                 # 设置 latest model, 这个参数不会被更新, 当前的模型正好是全局的参数
                 self.model.set_global_model(self.model, device=self.device)
+
+            c.recover_client_data()
             stat = c.solve_epochs(round_i, num_epochs, hide_output=self.quiet)
 
             num_samples.append(stat['num_samples'])
@@ -116,7 +96,7 @@ class FedFuse(FedBase):
             soln = c.get_model_parameters_dict()
             solns.append(soln)
             # 保存当前客户端的 fuse 或者 conv 算子的参数
-            # c.backup_client_data()
+            c.backup_attention()
 
         mean_loss = sum(losses) / sum(num_samples)
         mean_acc = sum(correct_num) / sum(num_samples)
@@ -141,7 +121,7 @@ class FedFuse(FedBase):
             if i == 0:
                 # 设置当前最新的模型, global 模型设置一次即可, 这个值是不会变的
                 self.model.set_global_model(self.model, device=self.device)
-            # c.recover_client_data()
+            c.recover_client_data()
             stats = c.test()
 
             num_samples.append(stats['num_samples'])
