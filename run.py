@@ -4,7 +4,7 @@ import torch
 import os
 import random
 from collections import namedtuple
-from dataset.read_data import read_leaf, read_from_file
+from dataset.read_data import read_leaf, read_from_file, read_torch_dataset
 from utils.data_utils import MiniDataset
 from config import DATASETS, TRAINERS, MODEL_CONFIG
 from config import base_options, add_dynamic_options
@@ -67,11 +67,13 @@ def main():
     # 数据的文件始终在其父目录
     dataset_prefix = os.path.realpath(options['data_prefix'])
     #
-    is_leaf = options['leaf']
-    if is_leaf:
+    data_format = options['data_format']
+    if data_format == 'leaf':
         train_path = os.path.join(dataset_prefix, 'data', dataset_name, 'data', 'train')
         test_path = os.path.join(dataset_prefix, 'data', dataset_name, 'data', 'test')
         df = read_leaf(dataset_name=dataset_name, options=options, train_data_dir=train_path, test_data_dir=test_path)
+    elif data_format == 'pytorch':
+        df = read_torch_dataset(dataset_name=dataset_name)
     else:
         train_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'train')
         test_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'test')

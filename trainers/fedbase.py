@@ -8,11 +8,11 @@ import torch
 from torch.utils.data import Dataset
 from torch import nn, optim
 import pandas as pd
-from clients.base_client import BaseClient, get_model_parameters_dict, set_model_parameters_dict
+from clients.base_client import BaseClient
 from utils.metrics import Metrics
 from utils.flops_counter import get_model_complexity_info
 from dataset.read_data import DatasetInfo
-
+import copy
 
 
 class FedBase(abc.ABC):
@@ -47,11 +47,10 @@ class FedBase(abc.ABC):
         self.eval_on_test_every_round = options['eval_on_test_every']
         self.eval_on_validation_every_round = options['eval_on_validation_every']
         # 使用 client 的API
-        self.latest_model = self.get_latest_model()
+        self.global_model = model
         self.name = '_'.join(['', f'wn[{options["clients_per_round"]}]', f'num_train[{self.num_train_clients}]', f'num_test[{self.num_test_clients}]'])
         self.metrics = Metrics(options=options, name=self.name, append2suffix=append2metric, result_prefix=options['result_prefix'])
         self.quiet = options['quiet']
-
 
     def setup_model(self, model):
         dev = self.options['device']
@@ -63,10 +62,6 @@ class FedBase(abc.ABC):
         # return model, flops, params_num, model_bytes
         return model, None, None, None
 
-    def get_latest_model(self) -> Dict[str, torch.Tensor]:
-        # 默认使用第一个训练的客户端的
-        return get_model_parameters_dict(self.model)
-
     def create_clients_group(self, users: Iterable[Any], train_or_test_dataset_obj: Dict[Any, Dataset], dataset_type) -> OrderedDict[Any, BaseClient]:
         """
 
@@ -75,7 +70,7 @@ class FedBase(abc.ABC):
         """
         all_clients = collections.OrderedDict()
         for user in users:
-            c = BaseClient(id=user, model=self.model, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
+            c = BaseClient(id=user, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
             all_clients[user] = c
         return all_clients
 
@@ -95,9 +90,6 @@ class FedBase(abc.ABC):
             return result
         else:
             raise NotImplementedError
-
-    def set_latest_model(self):
-        set_model_parameters_dict(self.model, self.latest_model)
 
     @abc.abstractmethod
     def aggregate(self, *args, **kwargs):
@@ -119,21 +111,21 @@ class FedBase(abc.ABC):
 
     def aggregate_parameters_weighted(self, solns: List[Dict[str, torch.Tensor]], num_samples: List[int]) -> Dict[str, torch.Tensor]:
         """
-        聚合模型
-        :param solns: 列表.
-        :param kwargs:
-        :return: 聚合后的参数
+        加权聚合模型
+        :param solns: 这些参数保存在CPU中
+        :param num_samples:
+        :return:
         """
-        lastes = dict()
+        # 产生新的数据
+        factors = np.asarray(num_samples) / sum(num_samples)
+        result = dict()
         for p_name in solns[0].keys():
             new = torch.zeros_like(solns[0][p_name])
-            sz = 0
-            for num_sample, sol in zip(num_samples, solns):
-                new += sol[p_name] * num_sample
-                sz += num_sample
-            new /= sz
-            lastes[p_name] = new
-        return lastes
+            for factor, sol in zip(factors, solns):
+                # inplace, factor * 当前参数
+                new.add_(sol[p_name], alpha=factor)
+            result[p_name] = new
+        return result
 
     def eval_on(self, round_i, clients: Iterable[BaseClient], client_type):
         df = pd.DataFrame(columns=['client_id', 'mean_acc', 'mean_loss', 'num_samples'])
@@ -143,8 +135,7 @@ class FedBase(abc.ABC):
         correct_num = []
         for c in clients:
             # 设置网络
-            self.set_latest_model()
-            stats = c.test()
+            stats = c.test(self.global_model)
 
             num_samples.append(stats['num_samples'])
             losses.append(stats['loss_meter'].sum)
@@ -173,16 +164,15 @@ class FedBase(abc.ABC):
 
         solns = []
         for c in clients:
-            self.set_latest_model()
+            model_to_client = copy.deepcopy(self.global_model).to(self.device)
             # 保存信息
-            stat = c.solve_epochs(round_i, num_epochs, hide_output=self.quiet)
+            stat, state_dict = c.solve_epochs(round_i, model_to_client, num_epochs, hide_output=self.quiet)
 
             num_samples.append(stat['num_samples'])
             losses.append(stat['loss_meter'].sum)
             correct_num.append(stat['acc_meter'].sum)
             #
-            soln = c.get_model_parameters_dict()
-            solns.append(soln)
+            solns.append(state_dict)
             # 写入测试的相关信息
             # self.metrics.update_commu_stats(round_i, flop_stat)
 

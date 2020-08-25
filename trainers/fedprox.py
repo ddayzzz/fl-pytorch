@@ -82,20 +82,22 @@ class FedProx(FedBase):
         :param kwargs:
         :return: 聚合后的参数
         """
-        lastes = list()
+        factors = np.asarray(num_samples) / sum(num_samples)
+        result = dict()
         num_params = len(solns[0])
         for p_name in range(num_params):
             new = torch.zeros_like(solns[0][p_name])
-            sz = 0
-            for num_sample, sol in zip(num_samples, solns):
-                new += sol[p_name] * num_sample
-                sz += num_sample
-            new /= sz
-            lastes.append(new)
-        return lastes
+            for factor, sol in zip(factors, solns):
+                new.add_(sol[p_name], alpha=factor)
+            result.append(new)
+        return result
 
     def aggregate(self, solns, num_samples):
-        return self.aggregate_parameters_weighted(solns, num_samples)
+        # return self.aggregate_parameters_weighted(solns, num_samples)
+        result = self.aggregate_parameters_weighted(solns, num_samples)
+        del solns
+        del self.latest_model
+        return result
 
     def solve_epochs(self,round_i, clients: List[int], num_epochs=None):
         if num_epochs is None:

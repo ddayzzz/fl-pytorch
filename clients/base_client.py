@@ -4,26 +4,13 @@ from torch.utils.data import DataLoader, Dataset
 from torch import optim
 from torch import nn
 from utils.metrics import Meter
-from typing import Dict, Union
-
-
-def get_model_parameters_dict(model: nn.Module) -> Dict[str, torch.Tensor]:
-    result = dict()
-    for k, v in model.named_parameters():
-        result[k] = v.detach().clone()
-    return result
-
-
-def set_model_parameters_dict(model: nn.Module, parameters_dict: Dict[str, torch.Tensor]):
-    # torch 自带 copy 的方法
-    for k, v in model.named_parameters():
-        # 见数据复制到 model 的位置, 二者是不共享位置的
-        v.data.copy_(parameters_dict[k])
+from typing import Dict, Union, Tuple
+import copy
 
 
 class BaseClient(object):
 
-    def __init__(self, id, model: nn.Module, dataset: Dataset, dataset_type: str, options: dict):
+    def __init__(self, id, dataset: Dataset, dataset_type: str, options: dict):
         """
 
         :param id:
@@ -38,13 +25,13 @@ class BaseClient(object):
         # 这个必须是客户端相关的
         self.num_dataset = len(dataset)
         self.num_workers = options['num_workers']
-        self.batch_size = options['batch_size']
+        self.batch_size = options['train_batch_size'] if dataset_type == 'train' else options['test_batch_size']
         self.device = options['device']
-        self.model = model
         self.dataset_type = dataset_type
         #
         self.criterion = self.create_criterion()
-        self.optimizer = self.create_optimizer()
+        # TODO, 待验证, 每个客户端创建一个 optimizer 的对象可能会造成内存泄露!!
+        # self.optimizer = self.create_optimizer()
         #
         self.dataset_loader = self.create_data_loader(dataset)
 
@@ -58,27 +45,21 @@ class BaseClient(object):
     def create_criterion(self):
         return nn.CrossEntropyLoss(reduction='mean').to(self.device)
 
-    def create_optimizer(self):
+    def create_optimizer(self, model: nn.Module):
         if self.dataset_type == 'train':
-            opt = optim.SGD(self.model.parameters(), lr=self.options['lr'], momentum=self.options['momentum'],
+            opt = optim.SGD(model.parameters(), lr=self.options['lr'], momentum=self.options['momentum'],
                             weight_decay=self.options['wd'])
             return opt
         else:
             return None
-
-    def get_model_parameters_dict(self) -> Dict[str, torch.Tensor]:
-        return get_model_parameters_dict(self.model)
-
-    def set_model_parameters_dict(self, parameters_dict: Dict[str, torch.Tensor]):
-        set_model_parameters_dict(self.model, parameters_dict)
 
     def count_correct(self, pred, targets):
         _, predicted = torch.max(pred, 1)
         correct = predicted.eq(targets).sum()
         return correct
 
-    def test(self) -> Dict[str, Union[int, Meter]]:
-        self.model.eval()
+    def test(self, model: nn.Module) -> Dict[str, Union[int, Meter]]:
+        model.eval()
 
         loss_meter = Meter()
         acc_meter = Meter()
@@ -88,7 +69,7 @@ class BaseClient(object):
 
             for batch_idx, (X, y) in enumerate(self.dataset_loader):
                 X, y = X.to(self.device), y.to(self.device)
-                pred = self.model(X)
+                pred = model(X)
                 loss = self.criterion(pred, y)
                 correct = self.count_correct(pred, y)
                 #
@@ -103,11 +84,12 @@ class BaseClient(object):
             'num_samples': num_all_samples
         }
 
-    def solve_epochs(self, round_i, num_epochs, hide_output: bool = False) -> Dict[str, Union[int, Meter]]:
+    def solve_epochs(self, round_i, model: nn.Module, num_epochs, hide_output: bool = False) -> Tuple[Dict[str, Union[int, Meter]], Dict[str, torch.Tensor]] :
         loss_meter = Meter()
         acc_meter = Meter()
         num_all_samples = 0
-        self.model.train()
+        optimizer = self.create_optimizer(model)
+        model.train()
 
         with tqdm.trange(num_epochs, disable=hide_output) as t:
 
@@ -117,13 +99,13 @@ class BaseClient(object):
                     # from IPython import embed
                     X, y = X.to(self.device), y.to(self.device)
 
-                    self.optimizer.zero_grad()
-                    pred = self.model(X)
+                    optimizer.zero_grad()
+                    pred = model(X)
 
                     loss = self.criterion(pred, y)
                     loss.backward()
                     # torch.nn.utils.clip_grad_norm(self.model.parameters(), 60)
-                    self.optimizer.step()
+                    optimizer.step()
 
                     correct_sum = self.count_correct(pred, y)
                     num_samples = y.size(0)
@@ -133,10 +115,11 @@ class BaseClient(object):
                     if (batch_idx % 10 == 0):
                         # 纯数值, 这里使用平均的损失
                         t.set_postfix(mean_loss=loss.item())
-
+        # 返回参数
+        state_dict = model.cpu().state_dict()
         # 输出相关的参数
         return {
             'loss_meter': loss_meter,
             'acc_meter': acc_meter,
             'num_samples': num_all_samples
-        }
+        }, state_dict

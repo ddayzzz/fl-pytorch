@@ -1,11 +1,13 @@
 # GLOBAL PARAMETERS
 import argparse
+import warnings
 
-DATASETS = ['shakespeare', 'mnist', 'sent140']
+DATASETS = ['shakespeare', 'mnist', 'sent140', 'cifar100', 'emnist']
 TRAINERS = {
     'fedavg': 'FedAvg',
     'fedprox': 'FedProx',
-    'fedfuse': 'FedFuse'
+    'fedfuse': 'FedFuse',
+    'fedavg_tff': 'FedAvgTFF'
 }
 
 TRAINER_NAMES = TRAINERS.keys()
@@ -13,10 +15,11 @@ MODEL_CONFIG = {
     'mnist.logistic': {'out_dim': 10, 'in_dim': 784},
     'mnist.cnn_att':  {'image_size': 28},
     'mnist.cnn': {'image_size': 28},
-    'femnist.cnn': {'num_classes': 62, 'image_size': 28},
+    'emnist.cnn': {'num_classes': 10, 'image_size': 28},
     'omniglot.cnn': {'num_classes': 5, 'image_size': 28},
     'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, },
     'sent140.stacked_lstm': {'seq_len': 25, 'num_classes': 2, 'n_hidden': 100, 'embedding_dim': 300},
+    'cifar100.resnet18': {},
 }
 
 
@@ -71,10 +74,14 @@ def base_options():
                         help='number of clients trained per round;',
                         type=int,
                         default=10)
-    parser.add_argument('--batch_size',
+    parser.add_argument('--train_batch_size',
                         help='batch size when clients train on data;',
                         type=int,
-                        default=10)
+                        default=32)
+    parser.add_argument('--test_batch_size',
+                        help='batch size when clients train on data;',
+                        type=int,
+                        default=100)
     parser.add_argument('--num_epochs',
                         help='number of epochs when clients train on data;',
                         type=int,
@@ -98,7 +105,7 @@ def base_options():
     parser.add_argument('--num_workers', type=int, default=0)
     # TODO 以后支持 之家加载 leaf 目录里的数据
     parser.add_argument('--data_prefix', type=str, default='./')
-    parser.add_argument('--leaf', action='store_true', default=False)
+    parser.add_argument('--data_format', type=str, default='', choices=['', 'leaf', 'pytorch'])
     return parser
 
 
@@ -112,4 +119,7 @@ def add_dynamic_options(parser):
         parser.add_argument('--drop_rate', help='drop rate', default=0.0, type=float)
     elif algo == 'fedfuse':
         parser.add_argument('--operator', help='fuse operator', type=str, required=True, choices=['multi', 'conv', 'single'])
+    elif algo == 'fedavg_tff':
+        parser.add_argument('--server_lr', help='learning rate for server', default=0.1, type=float)
+        warnings.warn('options "lr" will be regard as learning rate for client')
     return parser

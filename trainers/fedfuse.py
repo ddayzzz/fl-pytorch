@@ -66,7 +66,11 @@ class FedFuse(FedBase):
         return all_clients
 
     def aggregate(self, solns, num_samples):
-        return self.aggregate_parameters_weighted(solns, num_samples)
+        # return self.aggregate_parameters_weighted(solns, num_samples)
+        result = self.aggregate_parameters_weighted(solns, num_samples)
+        del solns
+        del self.latest_model
+        return result
 
     def solve_epochs(self,round_i, clients: Iterable[FedFuseClient], num_epochs=None):
         if num_epochs is None:
@@ -93,7 +97,7 @@ class FedFuse(FedBase):
             losses.append(stat['loss_meter'].sum)
             correct_num.append(stat['acc_meter'].sum)
             #
-            soln = c.get_model_parameters_dict()
+            soln = c.get_model_state_dict()
             solns.append(soln)
             # 保存当前客户端的 fuse 或者 conv 算子的参数
             c.backup_attention()

@@ -8,7 +8,7 @@ from dataset.shakespeare.shakespeare import Shakespeare
 from dataset.sent140.sent140 import Sent140
 
 
-__all__ = ['read_leaf', 'read_from_file']
+__all__ = ['read_leaf', 'read_from_file', 'read_torch_dataset']
 DATASET_WRAPPER = {
     'shakespeare': Shakespeare,
     'sent140': Sent140
@@ -132,5 +132,33 @@ def read_from_file(dataset_name, options, train_data_dir, test_data_dir, sub_dat
     )
 
 
-def read_from_tff(dataset_name):
-    pass
+def read_torch_dataset(dataset_name) -> DatasetInfo:
+    """
+    直接从某个类中读取完整的数据集
+    :param dataset_name:
+    :return:
+    """
+    if dataset_name == 'cifar100':
+        from dataset.cifar100.cifar100 import make_data
+        train_clients, train_data, test_clients, test_data = make_data()
+        ds = DatasetInfo(
+            train_data=train_data,
+            train_users=train_clients,
+            test_data=test_data,
+            test_users=test_clients,
+            validation_data=None
+        )
+    elif dataset_name == 'emnist':
+        from dataset.emnist.emnist_tff import make_data
+        # 使用62分类
+        train_clients, train_data, test_clients, test_data = make_data(only_digits=True)
+        ds = DatasetInfo(
+            train_data=train_data,
+            train_users=train_clients,
+            test_data=test_data,
+            test_users=test_clients,
+            validation_data=None
+        )
+    else:
+        raise NotImplemented
+    return ds

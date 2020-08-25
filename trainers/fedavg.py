@@ -7,7 +7,8 @@ class FedAvg(FedBase):
         super(FedAvg, self).__init__(options=options, model=model, dataset_info=dataset_info, append2metric=None)
 
     def aggregate(self, solns, num_samples):
-        return self.aggregate_parameters_weighted(solns, num_samples)
+        new_state = self.aggregate_parameters_weighted(solns, num_samples)
+        self.global_model.load_state_dict(new_state)
 
     def train(self):
         for round_i in range(self.num_rounds):
@@ -16,9 +17,7 @@ class FedAvg(FedBase):
             selected_clients = self.select_clients(round_i=round_i, clients_per_rounds=self.clients_per_round)
 
             solns, num_samples = self.solve_epochs(round_i, clients=selected_clients)
-
-
-            self.latest_model = self.aggregate(solns, num_samples)
+            self.aggregate(solns, num_samples)
             # eval on test
             if round_i % self.eval_on_test_every_round == 0:
                 self.eval_on(round_i=round_i, clients=self.test_clients, client_type='test')
@@ -30,4 +29,7 @@ class FedAvg(FedBase):
                 # self.save_model(round_i)
                 self.metrics.write()
 
-        self.metrics.write()
+            # if round_i % 50 == 0:
+            #     torch.cuda.empty_cache()
+
+        # self.metrics.write()
