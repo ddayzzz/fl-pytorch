@@ -37,6 +37,8 @@ def read_options():
     # 将配置的参数添加到测试文件中
     model_cfg_key ='.'.join((dataset_name, options['model']))
     model_cfg = MODEL_CONFIG.get(model_cfg_key)
+    if model_cfg is None:
+        raise NotImplemented('Model key {} not found!'.format(model_cfg_key))
 
     # 加载选择的 solver 类
     trainer_path = 'trainers.%s' % options['algo']
@@ -73,7 +75,7 @@ def main():
         test_path = os.path.join(dataset_prefix, 'data', dataset_name, 'data', 'test')
         df = read_leaf(dataset_name=dataset_name, options=options, train_data_dir=train_path, test_data_dir=test_path)
     elif data_format == 'pytorch':
-        df = read_torch_dataset(dataset_name=dataset_name)
+        df = read_torch_dataset(dataset_name=dataset_name, options=options)
     else:
         train_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'train')
         test_path = os.path.join(dataset_prefix, 'dataset', dataset_name, 'data', 'test')

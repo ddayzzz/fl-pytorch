@@ -48,6 +48,7 @@ class FedBase(abc.ABC):
         self.eval_on_validation_every_round = options['eval_on_validation_every']
         # 使用 client 的API
         self.global_model = model
+        self.global_model.train()
         self.name = '_'.join(['', f'wn[{options["clients_per_round"]}]', f'num_train[{self.num_train_clients}]', f'num_test[{self.num_test_clients}]'])
         self.metrics = Metrics(options=options, name=self.name, append2suffix=append2metric, result_prefix=options['result_prefix'])
         self.quiet = options['quiet']
@@ -117,12 +118,14 @@ class FedBase(abc.ABC):
         :return:
         """
         # 产生新的数据
-        factors = np.asarray(num_samples) / sum(num_samples)
+        arr = np.asarray(num_samples, dtype=np.float32)
+        factors = arr / np.sum(arr)
         result = dict()
         for p_name in solns[0].keys():
             new = torch.zeros_like(solns[0][p_name])
             for factor, sol in zip(factors, solns):
-                # inplace, factor * 当前参数
+                # TODO inplace, factor * 当前参数, 如果参数为不是浮点数, 那么这个可能会出现问题. 需要格外注意在 buffer 和 parameter
+                #  中出现了整数类型的参数, 例如 batc norm , track_running_stats = True, 就会在 buffer 中创建一个 long
                 new.add_(sol[p_name], alpha=factor)
             result[p_name] = new
         return result
@@ -158,6 +161,7 @@ class FedBase(abc.ABC):
         if num_epochs is None:
             num_epochs = self.num_epochs
 
+        self.global_model.train()
         num_samples = []
         losses = []
         correct_num = []

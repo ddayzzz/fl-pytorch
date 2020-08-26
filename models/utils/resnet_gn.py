@@ -3,6 +3,7 @@ import torch.nn as nn
 import math
 import torch.utils.model_zoo as model_zoo
 from models.utils.group_normalization import GroupNorm2d
+
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
 
@@ -24,8 +25,8 @@ def conv3x3(in_planes, out_planes, stride=1):
 def norm2d(planes, num_channels_per_group=32):
     print("num_channels_per_group:{}".format(num_channels_per_group))
     if num_channels_per_group > 0:
-        return GroupNorm2d(planes, num_channels_per_group, affine=True,
-                           track_running_stats=False)
+        # track_running_stats=False 避免浮点数
+        return GroupNorm2d(planes, num_channels_per_group, affine=True, track_running_stats=False)
     else:
         return nn.BatchNorm2d(planes)
 
@@ -33,8 +34,7 @@ def norm2d(planes, num_channels_per_group=32):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None,
-                 group_norm=0):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, group_norm=0):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm2d(planes, group_norm)
@@ -106,13 +106,23 @@ class Bottleneck(nn.Module):
 class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, group_norm=0):
+        """
+        :param block: basic: resnet18, resnet34; 其余为 bottleneack
+        :param layers:
+        :param num_classes:
+        :param group_norm:
+        """
+        # 可以参照 TFF 中的 tensorflow_federated/python/research/utils/models/resnet_models.py
+        # 对于
         self.inplanes = 64
         super(ResNet, self).__init__()
+        # 第一层 conv1 的参数, kernel = 7, stride=2, out_filter=64, 使用max pooling
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = norm2d(64, group_norm)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        # 创建 layer. 在 tff 中, 每加一个 layer, 输出通道 *2
         self.layer1 = self._make_layer(block, 64, layers[0],
                                        group_norm=group_norm)
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
@@ -121,13 +131,16 @@ class ResNet(nn.Module):
                                        group_norm=group_norm)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
                                        group_norm=group_norm)
-        self.avgpool = nn.AvgPool2d(7, stride=1)
+        # self.avgpool = nn.AvgPool2d(kernel_size=7, stride=(1, 1))
+        # TODO 参照 torchvision
+        self.avgpool = nn.AvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
+
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
@@ -143,8 +156,17 @@ class ResNet(nn.Module):
 
 
     def _make_layer(self, block, planes, blocks, stride=1, group_norm=0):
+        """
+        :param block: block创建函数
+        :param planes: 用来判断是否是第一层 layer?
+        :param blocks:
+        :param stride:
+        :param group_norm:
+        :return:
+        """
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
+            # 补齐, 每隔x层，空间上/2（下采样）但深度翻倍。
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
@@ -231,3 +253,12 @@ def resnet152(pretrained=False, **kwargs):
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152']))
     return model
+
+
+if __name__ == '__main__':
+    model = resnet18(pretrained=False, num_classes=100, group_norm=2)
+    print(model)
+    import torch
+    x = torch.rand([10, 3, 32, 32])
+    y = model(x)
+    print(y.shape)

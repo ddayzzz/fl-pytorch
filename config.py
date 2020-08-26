@@ -19,7 +19,8 @@ MODEL_CONFIG = {
     'omniglot.cnn': {'num_classes': 5, 'image_size': 28},
     'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, },
     'sent140.stacked_lstm': {'seq_len': 25, 'num_classes': 2, 'n_hidden': 100, 'embedding_dim': 300},
-    'cifar100.resnet18': {},
+    'cifar100.resnet18_gn': {},
+    'cifar100.resnet56': {}
 }
 
 
@@ -113,6 +114,7 @@ def add_dynamic_options(parser):
     # 获取对应的 solver 的名称
     params = parser.parse_known_args()[0]
     algo = params.algo
+    dataset = params.dataset
     # for example
     if algo in ['fedprox']:
         parser.add_argument('--mu', help='mu', type=float, default=0.1)
@@ -122,4 +124,8 @@ def add_dynamic_options(parser):
     elif algo == 'fedavg_tff':
         parser.add_argument('--server_lr', help='learning rate for server', default=0.1, type=float)
         warnings.warn('options "lr" will be regard as learning rate for client')
+
+    # 添加数据相关的参数
+    if dataset.startswith('cifar100'):
+        parser.add_argument('--cifar100_image_size', help='crop image size', type=int, default=32)
     return parser

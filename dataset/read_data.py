@@ -132,7 +132,7 @@ def read_from_file(dataset_name, options, train_data_dir, test_data_dir, sub_dat
     )
 
 
-def read_torch_dataset(dataset_name) -> DatasetInfo:
+def read_torch_dataset(dataset_name, options) -> DatasetInfo:
     """
     直接从某个类中读取完整的数据集
     :param dataset_name:
@@ -140,7 +140,7 @@ def read_torch_dataset(dataset_name) -> DatasetInfo:
     """
     if dataset_name == 'cifar100':
         from dataset.cifar100.cifar100 import make_data
-        train_clients, train_data, test_clients, test_data = make_data()
+        train_clients, train_data, test_clients, test_data = make_data(options=options)
         ds = DatasetInfo(
             train_data=train_data,
             train_users=train_clients,

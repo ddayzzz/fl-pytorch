@@ -116,7 +116,7 @@ class BaseClient(object):
                         # 纯数值, 这里使用平均的损失
                         t.set_postfix(mean_loss=loss.item())
         # 返回参数
-        state_dict = model.cpu().state_dict()
+        state_dict = model.state_dict()
         # 输出相关的参数
         return {
             'loss_meter': loss_meter,

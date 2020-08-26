@@ -41,6 +41,13 @@ class Model(nn.Module):
 if __name__ == '__main__':
     x = torch.rand([10, 1, 28, 28])
     model = Model(10, 28, None)
-    y = model(x)
-    print(y.shape)
+    print(model.fc1.weight.data_ptr(), model.fc1.weight)
+    t = model.state_dict()
+    fc1w = t['fc1.weight']
+    a = torch.rand(fc1w.shape)
+    a.add_(fc1w)
+    print(a.data_ptr(), a)
+    print(fc1w.data_ptr(), fc1w)
+    fc1w.copy_(a)
+    print(fc1w.data_ptr(), fc1w)
 

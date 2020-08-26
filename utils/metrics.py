@@ -65,8 +65,8 @@ class Metrics(object):
             self.train_writer.add_scalar('train_' + k, v, round_i)
 
     def update_eval_stats(self, round_i, on_which, other_to_logger, df=None):
-        if df is not None:
-            df.to_csv(os.path.join(self.eval_metric_folder, f'round_{round_i}_eval_on_{on_which}.csv'))
+        # if df is not None:
+        #     df.to_csv(os.path.join(self.eval_metric_folder, f'round_{round_i}_eval_on_{on_which}.csv'))
         for k, v in other_to_logger.items():
             self.eval_writer.add_scalar(f'eval_on_{on_which}_{k}', v, round_i)
 
