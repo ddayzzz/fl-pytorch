@@ -35,7 +35,7 @@ def create_dataset(dataset: _EMNISTTFFVersion):
     return dataset.client_ids, cid_to_dataset
 
 
-def make_data(only_digits=True):
+def make_data(only_digits):
     data_prefix = os.path.join(DATA, 'data')
     # 可能需要进行处理, 按照tff的叙述, emnist 已经经过处理
     train_client_data = _EMNISTTFFVersion(data_prefix=data_prefix, is_train=True, only_digitis=only_digits)

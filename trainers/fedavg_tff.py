@@ -165,8 +165,9 @@ class FedAvgTFF(FedBase):
             if round_i % self.eval_on_train_every_round == 0:
                 self.eval_on(round_i=round_i, clients=self.train_clients, client_type='train')
 
-            if round_i % self.save_every_round == 0:
-                # self.save_model(round_i)
+            if round_i > 0 and round_i % self.save_every_round == 0:
+                self.save(round_i)
                 self.metrics.write()
 
         self.metrics.write()
+        self.save(self.num_rounds)

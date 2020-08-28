@@ -44,9 +44,14 @@ class Metrics(object):
         #     self.exp_name += '_{}'.format(suffix)
         train_event_folder = mkdir(os.path.join(self.result_path, self.exp_name, 'train.event'))
         eval_event_folder = mkdir(os.path.join(self.result_path, self.exp_name, 'eval.event'))
+        self.chekpoints_folder = mkdir(os.path.join(self.metric_root, 'checkpoints'))
         self.eval_metric_folder = mkdir(os.path.join(self.result_path, self.exp_name, 'eval_metric'))
         self.train_writer = SummaryWriter(train_event_folder)
         self.eval_writer = SummaryWriter(eval_event_folder)
+
+    @property
+    def metric_root(self):
+        return os.path.join(self.result_path, self.exp_name)
 
     def update_commu_stats(self, round_i, stats):
         cid, bytes_w, comp, bytes_r = \

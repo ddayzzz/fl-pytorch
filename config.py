@@ -16,6 +16,7 @@ MODEL_CONFIG = {
     'mnist.cnn_att':  {'image_size': 28},
     'mnist.cnn': {'image_size': 28},
     'emnist.cnn': {'num_classes': 10, 'image_size': 28},
+    'emnist.cnn_cr': {'num_classes': 62, },
     'omniglot.cnn': {'num_classes': 5, 'image_size': 28},
     'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, },
     'sent140.stacked_lstm': {'seq_len': 25, 'num_classes': 2, 'n_hidden': 100, 'embedding_dim': 300},
@@ -70,7 +71,7 @@ def base_options():
     parser.add_argument('--save_every',
                         help='save global model every ____ rounds;',
                         type=int,
-                        default=50)
+                        default=100)
     parser.add_argument('--clients_per_round',
                         help='number of clients trained per round;',
                         type=int,

@@ -151,7 +151,7 @@ def read_torch_dataset(dataset_name, options) -> DatasetInfo:
     elif dataset_name == 'emnist':
         from dataset.emnist.emnist_tff import make_data
         # 使用62分类
-        train_clients, train_data, test_clients, test_data = make_data(only_digits=True)
+        train_clients, train_data, test_clients, test_data = make_data(only_digits=False)
         ds = DatasetInfo(
             train_data=train_data,
             train_users=train_clients,

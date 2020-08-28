@@ -191,3 +191,8 @@ class FedBase(abc.ABC):
         self.metrics.update_train_stats(round_i, stats)
         return solns, num_samples
 
+    def save(self, round_i):
+        filename = os.path.join(self.metrics.chekpoints_folder, 'checkpoint_at_round_{}.pth'.format(round_i))
+        torch.save(self.global_model.state_dict(), filename)
+        print(">>> Save checkpoint at round {}!".format(round_i))
+

@@ -1,8 +1,6 @@
 # codes borrow from https://github.com/FedML-AI/FedML/blob/0b7c05af36ee44c194ad9b04a1bb7215750202ce/fedml_api/model/deep_neural_networks/resnet_gn.py
 import torch.nn as nn
-import math
 import torch.utils.model_zoo as model_zoo
-from models.utils.group_normalization import GroupNorm2d
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
@@ -22,11 +20,13 @@ def conv3x3(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
 
+
 def norm2d(planes, num_channels_per_group=32):
     print("num_channels_per_group:{}".format(num_channels_per_group))
     if num_channels_per_group > 0:
-        # track_running_stats=False 避免浮点数
-        return GroupNorm2d(planes, num_channels_per_group, affine=True, track_running_stats=False)
+        # track_running_stats=False 避免浮点数, 使用pytorch自带的 gn
+        # return GroupNorm2d(planes, num_channels_per_group, affine=True, track_running_stats=False)
+        return nn.GroupNorm(num_channels=planes, num_groups=num_channels_per_group)
     else:
         return nn.BatchNorm2d(planes)
 
@@ -117,6 +117,7 @@ class ResNet(nn.Module):
         self.inplanes = 64
         super(ResNet, self).__init__()
         # 第一层 conv1 的参数, kernel = 7, stride=2, out_filter=64, 使用max pooling
+        ## 这里指定 padding3以及接下来的 maxpool 指定 padding=1, 就是为了实现 padding=same的效果
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = norm2d(64, group_norm)
@@ -133,26 +134,29 @@ class ResNet(nn.Module):
                                        group_norm=group_norm)
         # self.avgpool = nn.AvgPool2d(kernel_size=7, stride=(1, 1))
         # TODO 参照 torchvision
-        self.avgpool = nn.AvgPool2d((1, 1))
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
-
+                # relu, fan_in
+                # https://pytorch.org/docs/stable/nn.init.html#torch.nn.init.kaiming_normal_
+                # https://keras.io/zh/initializers/
+                # n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                # m.weight.data.normal_(0, math.sqrt(2. / n))
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
             elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, GroupNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.GroupNorm):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
         for m in self.modules():
             if isinstance(m, Bottleneck):
-                m.bn3.weight.data.fill_(0)
+                nn.init.constant_(m.bn3.weight, 0)
             if isinstance(m, BasicBlock):
-                m.bn2.weight.data.fill_(0)
+                nn.init.constant_(m.bn2.weight, 0)
 
 
     def _make_layer(self, block, planes, blocks, stride=1, group_norm=0):
@@ -256,9 +260,6 @@ def resnet152(pretrained=False, **kwargs):
 
 
 if __name__ == '__main__':
-    model = resnet18(pretrained=False, num_classes=100, group_norm=2)
-    print(model)
-    import torch
-    x = torch.rand([10, 3, 32, 32])
-    y = model(x)
-    print(y.shape)
+    from torchsummary import summary
+    model = resnet18(pretrained=False, num_classes=100, group_norm=2).cuda()
+    print(summary(model, (3, 32, 32)))

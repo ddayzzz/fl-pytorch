@@ -56,7 +56,7 @@ class CIFAR100TFFVersion(Dataset):
                                  'sha256': 'e8575e22c038ecef1ce6c7d492d7abee7da13b1e1ba9b70a7fc18531ba7590de'}
     }
 
-    def __init__(self, data_prefix, is_train=True, crop_size=32):
+    def __init__(self, data_prefix, is_train=True):
         """
         The dataset is downloaded and cached locally. If previously downloaded, it tries to load the dataset from cache.
         The dataset is derived from the CIFAR-100 dataset. The training and testing examples are partitioned across 500
@@ -79,17 +79,8 @@ class CIFAR100TFFVersion(Dataset):
         self.data_prefix = data_prefix
         self.tff_raw_data = mkdir(os.path.join(data_prefix, 'tff_raw_data'))
         data_path = self.check_file(filename='fed_cifar100.tar.bz2')
-        self.examples, self.client_ids = self.load_data(data_path)
-        size = 0
-        data = collections.OrderedDict()
-        for cid in self.client_ids:
-            x, label, corase_label = self.examples['examples'][cid]['image'].value, self.examples['examples'][cid]['label'].value, self.examples['examples'][cid]['coarse_label'].value
-            # x 默认我i uint8
-            x = self.preprocess(x, crop_size=crop_size)
-            size += len(label)
-            data[cid] = (x, label, corase_label)
-        self.client_wise_data = data
-        self.size = size
+        self.h5_data, self.client_ids = self.load_data(data_path)
+        # self.per_image_standard = per_image_standard
         # 访问方式: examples['examples'][client_ids[0]]['image'].value
         # 开始处理数据
         # self.train_labels, self.train_coarse_label, self.train_image = train_examples.labels, train_examples.coarse_label, train_examples.image
@@ -113,26 +104,29 @@ class CIFAR100TFFVersion(Dataset):
         client_ids = sorted(list(h5_file['examples'].keys()))
         return h5_file, client_ids
 
-    def preprocess(self, x, crop_size):
-        if crop_size != 32:
-            n = x.shape[0]
-            # TODO 这里假设 H W 是相同的, 且不考虑 crop_size < 32 的情况
-            x = [Image.fromarray(x[i], mode='RGB').resize((crop_size, crop_size), Image.BILINEAR) for i in range(n)]
-            x = np.stack(x, axis=0)
-        x = x.astype(np.float32)
-        x /= 255.0
-        # N, H, W, C -> N, C, H, W
-        x = np.transpose(x, (0, 3, 1, 2))
-        return x
+    def create_dataset_for_client(self, client_id):
+        data = collections.OrderedDict((name, ds[()]) for name, ds in sorted(
+            self.h5_data['examples'][client_id].items()))
+        x, label, corase_label = data['image'], data['label'], data['coarse_label']
+        return x, label, corase_label
+
+    def create_dataset_for_all_client(self):
+        size = 0
+        data = collections.OrderedDict()
+        for cid in self.client_ids:
+            x, label, corase_label = self.create_dataset_for_client(cid)
+            size += len(label)
+            data[cid] = (x, label, corase_label)
+        return data
 
     def __len__(self):
-        return self.size
+        return len(self.client_ids)
 
     def __getitem__(self, item):
         if isinstance(item, int):
-            return self.client_wise_data[self.client_ids[item]]
+            return self.create_dataset_for_client(self.client_ids[item])
         else:
-            return self.client_wise_data[item]
+            return self.create_dataset_for_client(item)
 
 
 
@@ -152,7 +146,7 @@ if __name__ == '__main__':
         x, label, cor_label = cifar100_train[cid]
         print(np.shape(x), label, cor_label)
         # 选择一张即可
-        images.append(torch.from_numpy(x[0, :, :, :]))
+        images.append(torch.from_numpy(np.transpose(x[0, :, :, :], (2, 0, 1))))
     images = torch.stack(images, dim=0)
     print(images.shape)
     to_show = make_grid(tensor=images, nrow=4)
