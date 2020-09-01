@@ -145,6 +145,7 @@ class ResNet(nn.Module):
                 # n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 # m.weight.data.normal_(0, math.sqrt(2. / n))
                 nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
+                m.weight.enable_weight_decay = True
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -157,6 +158,10 @@ class ResNet(nn.Module):
                 nn.init.constant_(m.bn3.weight, 0)
             if isinstance(m, BasicBlock):
                 nn.init.constant_(m.bn2.weight, 0)
+        self.fc.weight.enable_weight_decay = True
+        self.fc.bias.enable_weight_decay = True
+        nn.init.normal_(self.fc.weight, mean=0.0, std=0.01)
+        nn.init.zeros_(self.fc.bias)
 
 
     def _make_layer(self, block, planes, blocks, stride=1, group_norm=0):
@@ -170,7 +175,7 @@ class ResNet(nn.Module):
         """
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
-            # 补齐, 每隔x层，空间上/2（下采样）但深度翻倍。
+            # 补齐, 每隔x层，空间上/2（下采样）但深度翻倍。用一个1x1的VALID(padding=0)的卷积
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),

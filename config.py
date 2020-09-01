@@ -7,7 +7,8 @@ TRAINERS = {
     'fedavg': 'FedAvg',
     'fedprox': 'FedProx',
     'fedfuse': 'FedFuse',
-    'fedavg_tff': 'FedAvgTFF'
+    'fedavg_tff': 'FedAvgTFF',
+    'adaptive': 'AdaptiveOptimization',
 }
 
 TRAINER_NAMES = TRAINERS.keys()
@@ -43,11 +44,7 @@ def base_options():
                         help='name of model;',
                         type=str,
                         default='logistic')
-    parser.add_argument('--wd',
-                        help='weight decay parameter;',
-                        type=float,
-                        default=0.001)
-    parser.add_argument('--momentum', type=float, default=0.5)
+
     parser.add_argument('--device',
                         help='device',
                         default='cpu:0',
@@ -88,10 +85,6 @@ def base_options():
                         help='number of epochs when clients train on data;',
                         type=int,
                         default=20)
-    parser.add_argument('--lr',
-                        help='learning rate for inner solver;',
-                        type=float,
-                        default=0.01)
     parser.add_argument('--seed',
                         help='seed for randomness;',
                         type=int,
@@ -111,6 +104,19 @@ def base_options():
     return parser
 
 
+def only_client_optimizer(parser):
+    parser.add_argument('--lr',
+                        help='learning rate for inner solver;',
+                        type=float,
+                        default=0.01)
+    parser.add_argument('--wd',
+                        help='weight decay parameter;',
+                        type=float,
+                        default=0.001)
+    parser.add_argument('--momentum', type=float, default=0.5)
+    return parser
+
+
 def add_dynamic_options(parser):
     # 获取对应的 solver 的名称
     params = parser.parse_known_args()[0]
@@ -120,11 +126,27 @@ def add_dynamic_options(parser):
     if algo in ['fedprox']:
         parser.add_argument('--mu', help='mu', type=float, default=0.1)
         parser.add_argument('--drop_rate', help='drop rate', default=0.0, type=float)
+        only_client_optimizer(parser)
     elif algo == 'fedfuse':
         parser.add_argument('--operator', help='fuse operator', type=str, required=True, choices=['multi', 'conv', 'single'])
+        only_client_optimizer(parser)
     elif algo == 'fedavg_tff':
-        parser.add_argument('--server_lr', help='learning rate for server', default=0.1, type=float)
-        warnings.warn('options "lr" will be regard as learning rate for client')
+        parser.add_argument('--client_optimizer', help='learning rate for each client', default='sgd', type=str, choices=['sgd'])
+        parser.add_argument('--client_lr', help='learning rate for each client', default=0.1, type=float)
+        parser.add_argument('--server_lr', help='learning rate for server', default=1.0, type=float)
+        parser.add_argument('--server_optimizer', help='optimizer for server', default='sgd', type=str, choices=['sgd'])
+    elif algo == 'adaptive':
+        parser.add_argument('--client_optimizer', help='learning rate for each client', default='sgd', type=str,
+                            choices=['sgd'])
+        parser.add_argument('--client_lr', help='learning rate for each client', default=0.1, type=float)
+        parser.add_argument('--server_lr', help='learning rate for server', default=1.0, type=float)
+        parser.add_argument('--server_optimizer', help='optimizer for server', default='sgd', type=str, choices=['sgd', 'adam'])
+        parser.add_argument('--wd', help='weight decay', default=0.0, type=float)
+        # 以下的参数, 不同的优化器要求不同!
+        parser.add_argument('--adaptive_epsilon', help='epsilon for adam-like optimizer', default=1e-7, type=float)
+        parser.add_argument('--adaptive_momentum', help='learning rate for server', default=0.9, type=float, choices=[0.9, 0.0])
+    else:
+        only_client_optimizer(parser)
 
     # 添加数据相关的参数
     if dataset.startswith('cifar100'):

@@ -27,13 +27,11 @@ class Metrics(object):
         self.customs_data = dict()
         self.num_rounds = num_rounds
         self.result_path = mkdir(os.path.join(result_prefix, self.options['dataset']))
-        suffix = '{}_sd[{}]_lr[{}]_ep[{}]_train_bs[{}]_test_bs[{}]_wd[{}]'.format(name,
-                                                                                  options['seed'],
-                                                                                  options['lr'],
-                                                                                  options['num_epochs'],
-                                                                                  options['train_batch_size'],
-                                                                                  options['test_batch_size'],
-                                                                                  options['wd'])
+        suffix = '{}_sd[{}]_ep[{}]_train_bs[{}]_test_bs[{}]'.format(name,
+                                                                           options['seed'],
+                                                                           options['num_epochs'],
+                                                                           options['train_batch_size'],
+                                                                           options['test_batch_size'])
         if append2suffix is not None:
             suffix += '_' + append2suffix
 

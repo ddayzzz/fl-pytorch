@@ -9,6 +9,8 @@ from torch.nn import Module
 import numpy as np
 import tqdm
 import collections
+from torch import optim
+from optimizers.adaptive.sgd import AdaptiveSGD
 
 
 STATE_TYPE = Dict[str, torch.Tensor]
@@ -18,6 +20,15 @@ class TFFClient(BaseClient):
 
     def __init__(self, id, dataset, dataset_type, options):
         super(TFFClient, self).__init__(id, dataset, dataset_type, options)
+
+    def create_optimizer(self, model: Module):
+        if self.dataset_type == 'train':
+            # opt = optim.SGD(model.parameters(), lr=self.options['client_lr'], momentum=0, weight_decay=self.options['wd'])
+            # 客户端默认都有使用不带有 momentum 的 SGD
+            opt = AdaptiveSGD(model, lr=self.options['client_lr'], momentum=0, weight_decay=self.options['wd'], partial_weight_decay=True)
+            return opt
+        else:
+            return None
 
     def solve_epochs_delta(self, round_i, model: Module, global_state: STATE_TYPE, num_epochs, hide_output: bool = False) -> Tuple[Dict[str, Union[int, Meter]], STATE_TYPE]:
         loss_meter = Meter()
@@ -65,7 +76,7 @@ class TFFClient(BaseClient):
         return result, state_dict
 
 
-class FedAvgTFF(FedBase):
+class AdaptiveOptimization(FedBase):
 
     def __init__(self, options, dataset_info, model):
         """
@@ -77,14 +88,37 @@ class FedAvgTFF(FedBase):
         """
         self.server_lr = options['server_lr']
         self.client_lr = options['client_lr']
-        a = 'client_lr[{}]_server_lr[{}]'.format(self.client_lr, self.server_lr)
-        super(FedAvgTFF, self).__init__(options=options, model=model, dataset_info=dataset_info, append2metric=a)
+        self.wd = options['wd']
+        server_optimizer_name = options['server_optimizer']
+        self.adaptive_momentum = options['adaptive_momentum']
+        target_optimizer = None
+        target_opt_name = None
+        opt_suffix = ''
+        if server_optimizer_name == 'sgd':
+            # FedAvg 和 FedAvgM
+            if self.adaptive_momentum > 0:
+                target_opt_name = 'fedavgm'
+                opt_suffix = 'momentum_[{}]'.format(self.adaptive_momentum)
+            else:
+                target_opt_name = 'fedavg'
+            target_optimizer = lambda : AdaptiveSGD(self.global_model, lr=self.server_lr, momentum=self.adaptive_momentum, weight_decay=self.wd, partial_weight_decay=True)
+        elif server_optimizer_name == 'adam':
+            from optimizers.adaptive.adam import AdaptiveAdamTF
+            epsilon = options['adaptive_epsilon']
+            target_opt_name = 'fedadam'
+            target_optimizer = lambda: AdaptiveAdamTF(self.global_model, lr=self.server_lr,weight_decay=self.wd, partial_weight_decay=True, eps=epsilon)
+            opt_suffix = f'epsilon[{epsilon}]'
+        else:
+            raise NotImplemented
+        a = 'client_lr[{}]_server_lr[{}]_server_opt[{}]_wd[{}]_{}'.format(self.client_lr, self.server_lr, target_opt_name, self.wd, opt_suffix)
+        super(AdaptiveOptimization, self).__init__(options=options, model=model, dataset_info=dataset_info, append2metric=a)
+        print('>>> Use ', target_opt_name, ' as server optimizer, its params: ', opt_suffix)
+        self.server_optimizer = target_optimizer()
 
     def create_clients_group(self, users: Iterable[Any], train_or_test_dataset_obj: Dict[Any, Dataset], dataset_type) -> OrderedDict[Any, TFFClient]:
         all_clients = collections.OrderedDict()
         for user in users:
-            c = TFFClient(id=user, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type,
-                           options=self.options)
+            c = TFFClient(id=user, dataset=train_or_test_dataset_obj[user], dataset_type=dataset_type, options=self.options)
             all_clients[user] = c
         return all_clients
 
@@ -101,13 +135,16 @@ class FedAvgTFF(FedBase):
         :return:
         """
         # θ^-, 为加权聚合后的模型参数, solns[1] 客户端的参数delta的列表
-        weighted_params = super(FedAvgTFF, self).aggregate_parameters_weighted(solns=solns[1], num_samples=num_samples)
+        weighted_params = super(AdaptiveOptimization, self).aggregate_parameters_weighted(solns=solns[1], num_samples=num_samples)
+        for p, v in weighted_params.items():
+            v.mul_(-1.0)
         # 这里使用的新的参数, 调用 global_model 的 state_dict(其使用 detach, 使用 in-place操作)
-        global_state = solns[0]
-        for k, v in global_state.items():
-            # θ = θ - server_lr * (-1.0 * θ^-)
-            v.add_(weighted_params[k].mul_(-1.0), alpha=-self.server_lr)
-
+        # global_state = solns[0]
+        # for k, v in global_state.items():
+        #     # θ = θ - server_lr * (-1.0 * θ^-)
+        #     v.add_(weighted_params[k].mul_(-1.0), alpha=-self.server_lr)
+        # 这列改为使用 server optimizer
+        self.server_optimizer.step_pseudo_grads(pseudo_grads=weighted_params)
 
     def aggregate(self, solns, num_samples):
         # 直接聚合
