@@ -89,7 +89,6 @@ class Conv2d(_ConvNd):
 
 # custom con2d, because pytorch don't have "padding='same'" option.
 def conv2d_same_padding(input, weight, bias=None, stride=1, padding=1, dilation=1, groups=1):
-
     input_rows = input.size(2)
     filter_rows = weight.size(2)
     effective_filter_size_rows = (filter_rows - 1) * dilation[0] + 1
@@ -109,3 +108,12 @@ def conv2d_same_padding(input, weight, bias=None, stride=1, padding=1, dilation=
     return F.conv2d(input, weight, bias, stride,
                   padding=(padding_rows // 2, padding_cols // 2),
                   dilation=dilation, groups=groups)
+
+if __name__ == '__main__':
+    from torch.nn import Conv2d as PTConv2d
+    x = torch.rand((2, 64, 8, 8))
+    conv1 = Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, groups=1, dilation=1)
+    y = conv1(x)
+    conv2 = PTConv2d(in_channels=64, out_channels=128, kernel_size=3, stride=2, groups=1, dilation=1, padding=3)
+    print(y.shape)
+    print((conv2(x)).shape)

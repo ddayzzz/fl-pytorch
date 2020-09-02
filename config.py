@@ -2,13 +2,14 @@
 import argparse
 import warnings
 
-DATASETS = ['shakespeare', 'mnist', 'sent140', 'cifar100', 'emnist']
+DATASETS = ['shakespeare', 'mnist', 'sent140', 'cifar100', 'emnist', 'brats']
 TRAINERS = {
     'fedavg': 'FedAvg',
     'fedprox': 'FedProx',
     'fedfuse': 'FedFuse',
     'fedavg_tff': 'FedAvgTFF',
     'adaptive': 'AdaptiveOptimization',
+    'adaptive_medical': 'AdaptiveOptimization'
 }
 
 TRAINER_NAMES = TRAINERS.keys()
@@ -22,7 +23,8 @@ MODEL_CONFIG = {
     'shakespeare.stacked_lstm': {'seq_len': 80, 'num_classes': 80, 'num_hidden': 256, },
     'sent140.stacked_lstm': {'seq_len': 25, 'num_classes': 2, 'n_hidden': 100, 'embedding_dim': 300},
     'cifar100.resnet18_gn': {},
-    'cifar100.resnet56': {}
+    'cifar100.resnet56': {},
+    'brats.unet3d': {'init_channels': 4, 'class_nums': 3, 'batch_norm': True},
 }
 
 
@@ -135,7 +137,7 @@ def add_dynamic_options(parser):
         parser.add_argument('--client_lr', help='learning rate for each client', default=0.1, type=float)
         parser.add_argument('--server_lr', help='learning rate for server', default=1.0, type=float)
         parser.add_argument('--server_optimizer', help='optimizer for server', default='sgd', type=str, choices=['sgd'])
-    elif algo == 'adaptive':
+    elif algo.startswith('adaptive'):
         parser.add_argument('--client_optimizer', help='learning rate for each client', default='sgd', type=str,
                             choices=['sgd'])
         parser.add_argument('--client_lr', help='learning rate for each client', default=0.1, type=float)
@@ -145,10 +147,17 @@ def add_dynamic_options(parser):
         # 以下的参数, 不同的优化器要求不同!
         parser.add_argument('--adaptive_epsilon', help='epsilon for adam-like optimizer', default=1e-7, type=float)
         parser.add_argument('--adaptive_momentum', help='learning rate for server', default=0.9, type=float, choices=[0.9, 0.0])
+        parser.add_argument('--lr_decay_policy', default='constant', type=str, choices=['constant', 'inv_sqrt', 'inv_lin', 'exp_decay'])
+        parser.add_argument('--lr_decay_rate', default=None, type=float)
+        parser.add_argument('--lr_decay_steps', default=None, type=int)
+        parser.add_argument('--lr_staircase', default=False, action='store_true')
+        parser.add_argument('--lr_warmup_steps', default=None, type=int)
     else:
         only_client_optimizer(parser)
 
     # 添加数据相关的参数
     if dataset.startswith('cifar100'):
         parser.add_argument('--cifar100_image_size', help='crop image size', type=int, default=32)
+    elif dataset.startswith('brats'):
+        parser.add_argument('--brats_config', help='crop image size', type=str, default='2018train_2019test')
     return parser

@@ -82,9 +82,9 @@ def main():
         df = read_from_file(train_data_dir=train_path, test_data_dir=test_path, sub_data=sub_data, dataset_name=dataset_name, options=options)
     # df: train_clients, train_groups, train_data, test_data
 
-    # 输出数据的信息
-    print_stats(df.train_data, df.train_users, title='>>> 训练数据信息')
-    print_stats(df.test_data, df.test_users, title='>>> 测试数据信息')
+    # 输出数据的信息(仅分类任务)
+    # print_stats(df.train_data, df.train_users, title='>>> 训练数据信息')
+    # print_stats(df.test_data, df.test_users, title='>>> 测试数据信息')
     # 调用solver
     trainer = trainer_class(options, df, model_obj)
     trainer.train()

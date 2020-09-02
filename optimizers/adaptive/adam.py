@@ -2,17 +2,22 @@ import torch
 import math
 from torch.nn import Module, Parameter
 from torch.optim.optimizer import required
-from optimizers.adaptive.server_opt import ServerOptimizer, Dict
+from optimizers.adaptive.server_opt import AdaptiveOptimizer, Dict
 import warnings
 
 
-class AdaptiveAdam(ServerOptimizer):
+class AdaptiveAdam(AdaptiveOptimizer):
     """
     基于论文Adaptive Federated Optimization实现的服务端的SGD优化器. 如果使用了动量, 那么这个优化算法则被称为 FEDAVGM, 如果动量为0, 则
     退化为普通的 FEDAVG
     """
 
-    def __init__(self, global_model: Module, lr=required, betas=(0.9, 0.999), eps=1e-8,
+    def __init__(self, global_model: Module, lr=required, lr_decay_policy: str='constant',
+                 decay_rate=None,
+                 decay_steps=None,
+                 staircase=False,
+                 warmup_steps=None,
+                 betas=(0.9, 0.999), eps=1e-8,
                  weight_decay: float = 0.0, amsgrad=False, partial_weight_decay=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -26,6 +31,11 @@ class AdaptiveAdam(ServerOptimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         super(AdaptiveAdam, self).__init__(global_model, lr=lr,
+                                           lr_decay_policy=lr_decay_policy,
+                                           decay_rate=decay_rate,
+                                           decay_steps=decay_steps,
+                                           staircase=staircase,
+                                           warmup_steps=warmup_steps,
                                            weight_decay=weight_decay,
                                            more_defaults=dict(eps=eps, betas=betas, amsgrad=amsgrad),
                                            partial_weight_decay=partial_weight_decay)
@@ -154,13 +164,18 @@ class AdaptiveAdam(ServerOptimizer):
                 p.addcdiv_(exp_avg, denom, value=-step_size)
 
 
-class AdaptiveAdamTF(ServerOptimizer):
+class AdaptiveAdamTF(AdaptiveOptimizer):
     """
     基于论文Adaptive Federated Optimization实现的服务端的SGD优化器. 如果使用了动量, 那么这个优化算法则被称为 FEDAVGM, 如果动量为0, 则
     退化为普通的 FEDAVG
     """
 
-    def __init__(self, global_model: Module, lr=required, betas=(0.9, 0.999), eps=1e-7,
+    def __init__(self, global_model: Module, lr=required, lr_decay_policy: str = 'constant',
+                 decay_rate=None,
+                 decay_steps=None,
+                 staircase=False,
+                 warmup_steps=None,
+                 betas=(0.9, 0.999), eps=1e-7,
                  weight_decay: float = 0.0, amsgrad=False, partial_weight_decay=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -174,9 +189,14 @@ class AdaptiveAdamTF(ServerOptimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         super(AdaptiveAdamTF, self).__init__(global_model, lr=lr,
-                                           weight_decay=weight_decay,
-                                           more_defaults=dict(eps=eps, betas=betas, amsgrad=amsgrad),
-                                           partial_weight_decay=partial_weight_decay)
+                                             lr_decay_policy=lr_decay_policy,
+                                             decay_rate=decay_rate,
+                                             decay_steps=decay_steps,
+                                             staircase=staircase,
+                                             warmup_steps=warmup_steps,
+                                             weight_decay=weight_decay,
+                                             more_defaults=dict(eps=eps, betas=betas, amsgrad=amsgrad),
+                                             partial_weight_decay=partial_weight_decay)
 
     def __setstate__(self, state):
         super(AdaptiveAdamTF, self).__setstate__(state)
@@ -262,7 +282,6 @@ class AdaptiveAdamTF(ServerOptimizer):
                     # Exponential moving average of squared gradient values
                     state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-
                 m_t_minus_1, v_minus_1 = state['m'], state['v']
 
                 beta1, beta2 = group['betas']
@@ -287,10 +306,12 @@ if __name__ == '__main__':
     class Model(Module):
         def __init__(self):
             super(Model, self).__init__()
-            self.param = Parameter(torch.ones((1, )))
+            self.param = Parameter(torch.ones((1,)))
 
         def forward(self, data):
             return self.param * 1.0
+
+
     model = Model()
     opt = AdaptiveAdamTF(model, lr=0.1, weight_decay=0.01, eps=0.1)
     var0 = model.param.item()
@@ -302,5 +323,3 @@ if __name__ == '__main__':
         var1 = model.param.item()
         print('diff: ', var0 - var1)
         var0 = var1
-
-

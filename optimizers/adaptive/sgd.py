@@ -1,17 +1,22 @@
 import torch
 from torch.nn import Module, Parameter
 from torch.optim.optimizer import required
-from optimizers.adaptive.server_opt import ServerOptimizer, Dict
+from optimizers.adaptive.server_opt import AdaptiveOptimizer, Dict
 import warnings
 
 
-class AdaptiveSGD(ServerOptimizer):
+class AdaptiveSGD(AdaptiveOptimizer):
     """
     基于论文Adaptive Federated Optimization实现的服务端的SGD优化器. 如果使用了动量, 那么这个优化算法则被称为 FEDAVGM, 如果动量为0, 则
     退化为普通的 FEDAVG
     """
 
-    def __init__(self, global_model: Module, lr=required, momentum: float=0, dampening=0, weight_decay=0.0, nesterov=False, partial_weight_decay=False):
+    def __init__(self, global_model: Module, lr=required, lr_decay_policy: str='constant',
+                 decay_rate=None,
+                 decay_steps=None,
+                 staircase=False,
+                 warmup_steps=None,
+                 momentum: float=0, dampening=0, weight_decay=0.0, nesterov=False, partial_weight_decay=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -23,7 +28,12 @@ class AdaptiveSGD(ServerOptimizer):
         super(AdaptiveSGD, self).__init__(global_model, lr=lr,
                                           more_defaults=dict(momentum=momentum, dampening=dampening, nesterov=nesterov),
                                           weight_decay=weight_decay,
-                                          partial_weight_decay=partial_weight_decay)
+                                          partial_weight_decay=partial_weight_decay,
+                                          lr_decay_policy=lr_decay_policy,
+                                          decay_rate=decay_rate,
+                                          decay_steps=decay_steps,
+                                          staircase=staircase,
+                                          warmup_steps=warmup_steps)
 
     def __setstate__(self, state):
         super(AdaptiveSGD, self).__setstate__(state)

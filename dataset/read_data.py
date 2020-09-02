@@ -159,6 +159,9 @@ def read_torch_dataset(dataset_name, options) -> DatasetInfo:
             test_users=test_clients,
             validation_data=None
         )
+    elif dataset_name == 'brats':
+        from dataset.brats.brats_loader import make_dataset
+        ds = make_dataset(options)
     else:
         raise NotImplemented
     return ds

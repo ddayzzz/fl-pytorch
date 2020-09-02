@@ -99,9 +99,10 @@ class Metrics(object):
 
 
 class Meter(object):
-    def __init__(self):
+    def __init__(self, name=None):
         self.sum = 0.0
         self.n = 0
+        self.name = name
 
     def update(self, val, n=1):
         self.sum += val * n

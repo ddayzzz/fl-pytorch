@@ -1,18 +1,66 @@
 import torch
 from torch.nn import Module
 import abc
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 from torch.optim.optimizer import Optimizer, required
-from torch.nn import Conv2d
+import math
 
 
+def exponential_learning_rate_decay(base_lr, decay_rate, decay_steps, staircase):
+    def call(round_i):
+        if staircase:
+            return base_lr * (decay_rate ** (round_i // decay_steps))
+        else:
+            return base_lr * (decay_rate ** (round_i / decay_steps))
+    return call
 
-class ServerOptimizer(Optimizer):
+def inverse_linear_decay_learning_rate(base_lr, decay_rate, decay_steps, staircase):
+    def call(round_i):
+        if staircase:
+            return base_lr / (1.0 + decay_rate * (round_i // decay_steps))
+        else:
+            return base_lr / (1.0 + decay_rate * (round_i / decay_steps))
+    return call
+
+def inverse_sqrt_decay_learning_rate(base_lr, decay_rate, decay_steps, staircase):
+    def call(round_i):
+        if staircase:
+            return base_lr / math.sqrt(1.0 + decay_rate * (round_i // decay_steps))
+        else:
+            return base_lr / math.sqrt(1.0 + decay_rate * (round_i / decay_steps))
+    return call
+
+
+def warmup_learning_rate(base_lr: float, warmup_steps: int, fn: Callable[[int], float]) -> Callable[[int], float]:
+    if warmup_steps is None or warmup_steps <= 0:
+        def call(round_i) -> float:
+            return fn(round_i)
+        return call
+    else:
+        def warmup_and_decay_fn(round_num) -> float:
+            warmedup_value = base_lr * (round_num + 1) / warmup_steps
+            if round_num < warmup_steps:
+                return warmedup_value
+            else:
+                return fn(round_num - warmup_steps)
+        return warmup_and_decay_fn
+
+
+class AdaptiveOptimizer(Optimizer):
     """
     基于论文 Adaptive Federated Optimization实现的服务端的优化器
     """
 
-    def __init__(self, global_model: Module, lr=required, more_defaults: Optional[Dict]=None, weight_decay=0, partial_weight_decay=False):
+    def __init__(self, global_model: Module,
+                 lr=required,
+                 lr_decay_policy: str='constant',
+                 decay_rate=None,
+                 decay_steps=None,
+                 staircase=False,
+                 warmup_steps=None,
+                 more_defaults: Optional[Dict]=None,
+                 weight_decay=0,
+                 partial_weight_decay=False):
         """
         创建对象
         :param global_model: 模型
@@ -22,6 +70,18 @@ class ServerOptimizer(Optimizer):
         :param weight_decay:
         :param nesterov:
         """
+        if lr_decay_policy == 'constant':
+            scheduler = warmup_learning_rate(lr, warmup_steps=warmup_steps, fn=lambda _: lr)
+        elif lr_decay_policy == 'exp_decay':
+            scheduler = warmup_learning_rate(lr, warmup_steps, exponential_learning_rate_decay(lr, decay_rate=decay_rate, decay_steps=decay_steps, staircase=staircase))
+        elif lr_decay_policy == 'inv_lin':
+            scheduler = warmup_learning_rate(lr, warmup_steps, inverse_linear_decay_learning_rate(lr, decay_rate=decay_rate, decay_steps=decay_steps, staircase=staircase))
+        elif lr_decay_policy == 'inv_sqrt':
+            scheduler = warmup_learning_rate(lr, warmup_steps, inverse_sqrt_decay_learning_rate(lr, decay_rate=decay_rate, decay_steps=decay_steps, staircase=staircase))
+        else:
+            raise ValueError(
+                'Unrecognized schedule type {!s}'.format(lr_decay_policy))
+        self.scheduler = scheduler
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if weight_decay < 0.0:
@@ -46,7 +106,15 @@ class ServerOptimizer(Optimizer):
         defaults.update(param_names=param_names, weight_decay_mask=weight_decay_mask)
         if more_defaults is not None:
             defaults.update(more_defaults)
-        super(ServerOptimizer, self).__init__(params, defaults)
+        super(AdaptiveOptimizer, self).__init__(params, defaults)
+
+    def step_lr_scheduler(self, round_i):
+        lr = self.scheduler(round_i)
+        for p in self.param_groups:
+            p['lr'] = lr
+
+    def get_current_lr(self):
+        return self.param_groups[0]['lr']
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -59,3 +127,13 @@ class ServerOptimizer(Optimizer):
         :return:
         """
         pass
+
+
+if __name__ == '__main__':
+    scheduler = warmup_learning_rate(1.0, 10, exponential_learning_rate_decay(1.0, decay_rate=0.9,
+                                                                                       decay_steps=10,
+                                                                                       staircase=False))
+    lr0 = scheduler(0)
+    lr1 = scheduler(9)
+    lr2 = scheduler(20)
+    print(lr0, lr1, lr2)
